@@ -88,7 +88,7 @@ class SheetsService:
                     item = {
                         'name': row[0],
                         'quantity': int(row[1]) if row[1].isdigit() else 0,
-                        'price': float(row[2]) if row[2].replace('.', '').isdigit() else 0.0  # Цена уже в тенге
+                        'price': str(float(row[2])) + " тенге" if row[2].replace('.', '').isdigit() else "0 тенге"  
                     }
                     if len(row) >= 4:  # If description exists
                         item['description'] = row[3]
@@ -109,7 +109,7 @@ class SheetsService:
         for item in inventory:
             formatted_info += f"- {item['name']}:\n"
             formatted_info += f"  Количество: {item['quantity']} шт.\n"
-            formatted_info += f"  Цена: {item['price']} тенге\n"
+            formatted_info += f"  Цена: {item['price']}\n"
             if 'description' in item:
                 formatted_info += f"  Описание: {item['description']}\n"
             formatted_info += "\n"

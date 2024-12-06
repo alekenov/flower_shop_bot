@@ -26,6 +26,9 @@ class Config:
         )
         self.GOOGLE_SHEETS_SPREADSHEET_ID = '1KIjFJppiwHXikFQrWz_7vKyDykA6LZ09rMH5-qIFBQk'
 
+        # Google Docs Knowledge Base
+        self.GOOGLE_DOCS_KNOWLEDGE_BASE_ID = '1KsRZZ1I2E45uXrRjYlwnwzCPM5faio6ohvjdgbnQExo'
+
     def _get_env(self, key: str) -> str:
         """
         Получает значение переменной окружения
