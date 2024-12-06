@@ -136,12 +136,31 @@ class OpenAIService:
                 logger.warning(f"Rate limit hit with model {current_model}, attempt {attempt + 1}/{max_retries}")
                 if self.current_model_index < len(self.models) - 1:
                     self.current_model_index += 1
-                    logger.info(f"Switching to model: {self.models[self.current_model_index]}")
+                    next_model = self.models[self.current_model_index]
+                    logger.info(f"Switching to model: {next_model}")
+                    continue  # Попробуем сразу с новой моделью
                 else:
-                    wait_time = base_retry_delay * (attempt + 1)
-                    logger.info(f"Waiting {wait_time} seconds before retry")
+                    # Если все модели исчерпаны, ждем и возвращаемся к первой
+                    self.current_model_index = 0
+                    wait_time = base_retry_delay * (2 ** attempt)  # Экспоненциальная задержка
+                    logger.info(f"All models exhausted. Waiting {wait_time} seconds before retry with {self.models[0]}")
                     await asyncio.sleep(wait_time)
+                    continue
+
             except APIError as e:
+                if "rate_limit" in str(e).lower():
+                    # Обрабатываем так же, как RateLimitError
+                    if self.current_model_index < len(self.models) - 1:
+                        self.current_model_index += 1
+                        next_model = self.models[self.current_model_index]
+                        logger.info(f"Switching to model: {next_model}")
+                        continue
+                    else:
+                        self.current_model_index = 0
+                        wait_time = base_retry_delay * (2 ** attempt)
+                        logger.info(f"All models exhausted. Waiting {wait_time} seconds before retry with {self.models[0]}")
+                        await asyncio.sleep(wait_time)
+                        continue
                 logger.error(f"API error: {e}")
                 wait_time = base_retry_delay * (attempt + 1)
                 await asyncio.sleep(wait_time)

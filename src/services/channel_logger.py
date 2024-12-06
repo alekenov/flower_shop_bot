@@ -1,5 +1,6 @@
 import logging
-from telegram import Bot
+from telegram import Bot, ParseMode
+from telegram import ReactionTypeEmoji
 from src.config.config import Config
 import asyncio
 
@@ -35,9 +36,17 @@ class ChannelLogger:
                     result = await self.bot.send_message(
                         chat_id=self.log_channel_id,
                         text=message,
-                        parse_mode='HTML'
+                        parse_mode=ParseMode.HTML
                     )
                     logger.info(f"Message sent successfully: {result.message_id}")
+                    await self.bot.set_message_reaction(
+                        chat_id=self.log_channel_id,
+                        message_id=result.message_id,
+                        reaction=[
+                            ReactionTypeEmoji("👍"),
+                            ReactionTypeEmoji("👎")
+                        ]
+                    )
                     await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Failed to send message to channel: {str(e)}")
@@ -79,12 +88,20 @@ class ChannelLogger:
             # Try direct send first
             try:
                 logger.info("Attempting direct message send")
-                await self.bot.send_message(
+                sent_message = await self.bot.send_message(
                     chat_id=self.log_channel_id,
                     text=message,
-                    parse_mode='HTML'
+                    parse_mode=ParseMode.HTML
                 )
                 logger.info("Direct message send successful")
+                await self.bot.set_message_reaction(
+                    chat_id=self.log_channel_id,
+                    message_id=sent_message.message_id,
+                    reaction=[
+                        ReactionTypeEmoji("👍"),
+                        ReactionTypeEmoji("👎")
+                    ]
+                )
                 return
             except Exception as e:
                 logger.error(f"Direct send failed, will try queue: {e}")
