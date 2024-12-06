@@ -1,0 +1,25 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Logs
+*.log
+
+# Virtual Environment
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Google Sheets credentials
+src/config/credentials/
+*.json
+
+# Node modules
+node_modules/
