@@ -8,7 +8,7 @@ sys.path.insert(0, project_root)
 
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 from src.config.config import Config
-from src.bot.handlers import start, help_command, handle_message
+from src.bot.handlers import start, help_command, handle_message, get_channel_id
 from src.utils.logger import setup_logger
 
 def main():
@@ -25,6 +25,7 @@ def main():
     # Регистрация обработчиков команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("channel_id", get_channel_id))
     
     # Обработчик текстовых сообщений
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

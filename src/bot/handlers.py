@@ -7,6 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from src.services.sheets_service import SheetsService
 from src.services.openai_service import OpenAIService
 from src.services.docs_service import DocsService
+from src.services.channel_logger import ChannelLogger
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 sheets_service = SheetsService()
 openai_service = OpenAIService()
 docs_service = DocsService()
+channel_logger = ChannelLogger()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -39,6 +41,23 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(help_text)
 
+async def get_channel_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /channel_id"""
+    if update.message.forward_from_chat:
+        channel_id = update.message.forward_from_chat.id
+        await update.message.reply_text(
+            f"ID канала: {channel_id}\n\n"
+            f"Добавьте этот ID в файл .env как:\n"
+            f"TELEGRAM_LOG_CHANNEL_ID={channel_id}"
+        )
+    else:
+        await update.message.reply_text(
+            "Чтобы узнать ID канала:\n"
+            "1. Отправьте любое сообщение в ваш канал\n"
+            "2. Перешлите это сообщение мне\n"
+            "Я покажу вам ID канала"
+        )
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
@@ -47,7 +66,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         inventory_info = sheets_service.format_inventory_for_openai(inventory)
         
         # Получаем ответ от OpenAI
-        response = await openai_service.get_response(update.message.text, inventory_info)
+        response = await openai_service.get_response(
+            update.message.text,
+            inventory_info,
+            user_id=update.effective_user.id
+        )
         
         # Фразы, указывающие на то, что бот не уверен или дает общий ответ
         uncertain_phrases = [
@@ -69,7 +92,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         
         # Определяем тип ответа для записи в документ
-        response_type = "Требует улучшения"
+        response_type = "Normal"
         if any(phrase in response.lower() for phrase in ["извините", "не могу", "не знаю"]):
             response_type = "Нет ответа"
         elif any(phrase in response.lower() for phrase in uncertain_phrases):
@@ -88,6 +111,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Failed to add question to Google Docs: {e}")
         
+        # Log to Telegram channel
+        try:
+            username = update.effective_user.username or str(update.effective_user.id)
+            await channel_logger.log_interaction(
+                user_id=update.effective_user.id,
+                username=username,
+                question=update.message.text,
+                answer=response,
+                response_type=response_type
+            )
+        except Exception as e:
+            logger.error(f"Failed to log to Telegram channel: {e}")
+        
         # Отправляем ответ пользователю
         await update.message.reply_text(response)
         
@@ -95,3 +131,5 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error handling message: {e}")
         error_message = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
         await update.message.reply_text(error_message)
+
+# Удаляем неправильно размещенные обработчики

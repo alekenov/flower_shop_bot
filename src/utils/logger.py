@@ -8,7 +8,7 @@ def setup_logger():
     """
     # Создаем логгер
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
 
     # Форматирование логов
     formatter = logging.Formatter(
@@ -18,6 +18,7 @@ def setup_logger():
     # Хендлер для консоли
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.DEBUG)
     logger.addHandler(console_handler)
 
     # Хендлер для файла
@@ -27,8 +28,9 @@ def setup_logger():
         backupCount=5
     )
     file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
 
     # Отключаем логи от библиотек
     logging.getLogger('httpx').setLevel(logging.WARNING)
-    logging.getLogger('telegram').setLevel(logging.WARNING)
+    logging.getLogger('telegram').setLevel(logging.DEBUG)

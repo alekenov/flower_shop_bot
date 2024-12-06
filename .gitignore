@@ -1,25 +1,46 @@
 # Environment variables
 .env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Logs
 *.log
+*.log.*
+logs/
 
 # Virtual Environment
 venv/
-env/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
 
 # Google Sheets credentials
 src/config/credentials/
 *.json
-
-# Node modules
-node_modules/
+!.env.example

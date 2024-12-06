@@ -15,6 +15,7 @@ class Config:
         
         # Telegram
         self.TELEGRAM_BOT_TOKEN = self._get_env('TELEGRAM_BOT_TOKEN')
+        self.TELEGRAM_LOG_CHANNEL_ID = self._get_env('TELEGRAM_LOG_CHANNEL_ID')
         
         # OpenAI
         self.OPENAI_API_KEY = self._get_env('OPENAI_API_KEY')

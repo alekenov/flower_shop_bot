@@ -5,6 +5,7 @@ import sys
 import time
 import asyncio
 from openai import RateLimitError, APIError
+from collections import defaultdict
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from src.config.config import Config
 from src.services.docs_service import DocsService
@@ -26,8 +27,13 @@ class OpenAIService:
             "gpt-3.5-turbo",        # Базовая модель
         ]
         self.current_model_index = 3  # Начинаем с gpt-3.5-turbo
-
-    async def get_response(self, user_message: str, inventory_info: str = None):
+        
+        # Хранение контекста для каждого пользователя
+        self.conversation_history = defaultdict(list)
+        # Максимальное количество сообщений в истории
+        self.max_history = 10
+    
+    async def get_response(self, user_message: str, inventory_info: str = None, user_id: int = None):
         """Получает ответ от OpenAI с учетом информации о товарах и базы знаний"""
         max_retries = 5
         base_retry_delay = 5  # начальная задержка в секундах
@@ -55,6 +61,8 @@ class OpenAIService:
                    - Покажи готовность помочь с другими вопросами
                    - При необходимости, вежливо предложи связаться с менеджером
                 5. Используй эмодзи для создания позитивного настроения 🌸
+                6. ВАЖНО: Внимательно следи за контекстом разговора! Если клиент спрашивает о конкретном виде цветов,
+                   продолжай разговор именно об этих цветах, не переходи на другие без явной необходимости.
                 
                 Примеры хороших ответов:
                 
@@ -73,6 +81,7 @@ class OpenAIService:
                 - Всегда предлагай альтернативы и дополнительные опции
                 - Задавай уточняющие вопросы, чтобы лучше понять потребности клиента
                 - Показывай готовность помочь и найти решение
+                - Сохраняй контекст разговора и отвечай в соответствии с ним
                 """
 
                 messages = [
@@ -90,7 +99,12 @@ class OpenAIService:
                         "role": "system",
                         "content": f"Актуальная информация о товарах:\n{inventory_info}"
                     })
-
+                
+                # Добавляем историю разговора для конкретного пользователя
+                if user_id:
+                    messages.extend(self.conversation_history[user_id])
+                
+                # Добавляем текущее сообщение пользователя
                 messages.append({
                     "role": "user",
                     "content": user_message
@@ -98,41 +112,41 @@ class OpenAIService:
 
                 current_model = self.models[self.current_model_index]
                 
-                try:
-                    response = await self.client.chat.completions.create(
-                        model=current_model,
-                        messages=messages,
-                        temperature=0.7,
-                        max_tokens=500
-                    )
-                    return response.choices[0].message.content.strip()
+                response = await self.client.chat.completions.create(
+                    model=current_model,
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=500
+                )
                 
-                except RateLimitError as e:
-                    logger.warning(f"Rate limit hit for model {current_model}, trying fallback...")
-                    # Пробуем следующую модель
-                    self.current_model_index = (self.current_model_index + 1) % len(self.models)
-                    if attempt < max_retries - 1:
-                        retry_delay = base_retry_delay * (2 ** attempt)  # Экспоненциальная задержка
-                        logger.info(f"Retrying in {retry_delay} seconds with model {self.models[self.current_model_index]}")
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    raise
+                bot_response = response.choices[0].message.content
+                
+                # Сохраняем сообщение пользователя и ответ бота в историю
+                if user_id:
+                    self.conversation_history[user_id].append({"role": "user", "content": user_message})
+                    self.conversation_history[user_id].append({"role": "assistant", "content": bot_response})
+                    
+                    # Ограничиваем историю
+                    if len(self.conversation_history[user_id]) > self.max_history * 2:  # *2 потому что каждый обмен это 2 сообщения
+                        self.conversation_history[user_id] = self.conversation_history[user_id][-self.max_history * 2:]
+                
+                return bot_response
 
-                except APIError as e:
-                    if "rate_limit_exceeded" in str(e).lower():
-                        # То же самое, что и для RateLimitError
-                        self.current_model_index = (self.current_model_index + 1) % len(self.models)
-                        if attempt < max_retries - 1:
-                            retry_delay = base_retry_delay * (2 ** attempt)
-                            logger.info(f"Retrying in {retry_delay} seconds with model {self.models[self.current_model_index]}")
-                            await asyncio.sleep(retry_delay)
-                            continue
-                    raise
-                
+            except RateLimitError as e:
+                logger.warning(f"Rate limit hit with model {current_model}, attempt {attempt + 1}/{max_retries}")
+                if self.current_model_index < len(self.models) - 1:
+                    self.current_model_index += 1
+                    logger.info(f"Switching to model: {self.models[self.current_model_index]}")
+                else:
+                    wait_time = base_retry_delay * (attempt + 1)
+                    logger.info(f"Waiting {wait_time} seconds before retry")
+                    await asyncio.sleep(wait_time)
+            except APIError as e:
+                logger.error(f"API error: {e}")
+                wait_time = base_retry_delay * (attempt + 1)
+                await asyncio.sleep(wait_time)
             except Exception as e:
-                logger.error(f"Error getting OpenAI response: {e}")
-                if attempt == max_retries - 1:
-                    return ("Извините, сейчас наш сервис испытывает технические трудности. "
-                           "Пожалуйста, напишите ваш вопрос менеджеру магазина, "
-                           "и он поможет вам как можно скорее! 🌸")
-                await asyncio.sleep(base_retry_delay * (2 ** attempt))
+                logger.error(f"Unexpected error: {e}")
+                raise
+
+        raise Exception("Failed to get response after maximum retries")
