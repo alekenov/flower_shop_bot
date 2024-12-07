@@ -24,5 +24,7 @@ jobs:
           version: latest
 
       - name: Deploy Edge Function
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
         run: |
-          supabase functions deploy telegram-bot --project-ref $PROJECT_ID
+          supabase functions deploy telegram-bot --project-ref $PROJECT_ID --no-verify-jwt
