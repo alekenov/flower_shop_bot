@@ -1,5 +1,5 @@
-import { serve } from "std/http/server.ts"
-import { Bot, webhookCallback } from "grammy"
+import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
+import { Bot, webhookCallback } from "https://deno.land/x/grammy@v1.17.1/mod.ts"
 import { config } from "./config.ts"
 
 // Ensure required environment variables are set
