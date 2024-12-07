@@ -28,4 +28,5 @@ jobs:
         run: |
           supabase functions deploy telegram-bot \
             --project-ref $PROJECT_ID \
-            --no-verify-jwt
+            --no-verify-jwt \
+            --env-file <(echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN")
