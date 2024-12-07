@@ -24,9 +24,10 @@ jobs:
         with:
           version: latest
 
+      - name: Set Function Secrets
+        run: |
+          supabase secrets set --project-ref "$PROJECT_ID" TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
+
       - name: Deploy Edge Function
         run: |
-          supabase functions deploy telegram-bot \
-            --project-ref $PROJECT_ID \
-            --no-verify-jwt \
-            --env-file <(echo "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN")
+          supabase functions deploy telegram-bot --project-ref "$PROJECT_ID" --no-verify-jwt
