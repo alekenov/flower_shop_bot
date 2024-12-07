@@ -14,7 +14,7 @@ const bot = new Bot(token)
 // Handle the /start command
 bot.command("start", async (ctx) => {
   try {
-    await ctx.reply("Welcome to the Flower Shop Bot! 🌸\nHow can I help you today?")
+    await ctx.reply("Welcome to the Flower Shop Bot! 🌸\nI'm here to help you with your floral needs!")
   } catch (error) {
     console.error("Error in /start command:", error)
     await ctx.reply("Sorry, there was an error processing your command.")
@@ -24,7 +24,7 @@ bot.command("start", async (ctx) => {
 // Handle text messages
 bot.on("message:text", async (ctx) => {
   try {
-    await ctx.reply("Thank you for your message! Our team will get back to you soon.")
+    await ctx.reply("Thank you for your message! Our team will get back to you soon. 🌺")
   } catch (error) {
     console.error("Error in message handler:", error)
     await ctx.reply("Sorry, there was an error processing your message.")
