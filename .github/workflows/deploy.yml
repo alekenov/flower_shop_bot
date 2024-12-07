@@ -28,5 +28,4 @@ jobs:
         run: |
           supabase functions deploy telegram-bot \
             --project-ref $PROJECT_ID \
-            --no-verify-jwt \
-            --import-map supabase/functions/telegram-bot/import_map.json
+            --no-verify-jwt
