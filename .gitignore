@@ -1,7 +1,7 @@
 # Environment variables
 .env
+.env.example
 .env.*
-!.env.example
 
 # Python
 __pycache__/
@@ -43,5 +43,6 @@ venv/
 # Google Sheets credentials
 src/config/credentials/
 *.json
-!.env.example
 !import_map.json
+
+node_modules/
