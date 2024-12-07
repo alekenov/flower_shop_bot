@@ -2,113 +2,104 @@
 // https://deno.land/manual/getting_started/setup_your_environment
 // This enables autocomplete, go to definition, etc.
 
-// Setup type definitions for built-in Supabase Runtime APIs
-import "jsr:@supabase/functions-js/edge-runtime.d.ts"
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { Bot, webhookCallback } from "https://deno.land/x/grammy@v1.19.2/mod.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
-import { Bot, webhookCallback } from 'https://deno.land/x/grammy@v1.19.2/mod.ts'
-import { Client } from 'https://deno.land/x/postgres@v0.17.0/mod.ts'
-
-// Database connection
-const dbClient = new Client({
-  hostname: "aws-0-eu-central-1.pooler.supabase.com",
-  port: 6543,
-  database: "postgres",
-  user: "postgres.dkohweivbdwweyvyvcbc",
-  password: "vigkif-nesJy2-kivraq",
-  tls: {
-    enabled: true,
-  },
-})
+// Initialize Supabase client
+const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+const supabaseKey = Deno.env.get('SUPABASE_KEY')!
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 // Initialize bot with your token
 const bot = new Bot(Deno.env.get('TELEGRAM_BOT_TOKEN')!)
 
-// Connect to database
-await dbClient.connect()
-
 // Handle /start command
-bot.command('start', async (ctx) => {
+bot.command("start", async (ctx) => {
   const userId = ctx.from?.id
-  const message = 'Добро пожаловать в наш магазин цветов! Чем могу помочь?'
+  const username = ctx.from?.username
+  const firstName = ctx.from?.first_name
+  const lastName = ctx.from?.last_name
   
-  await ctx.reply(message)
+  const message = "Добро пожаловать в наш магазин цветов! \nЯ помогу вам выбрать и заказать букет."
   
-  // Log the interaction
-  if (userId) {
-    await dbClient.queryObject`
-      INSERT INTO chat_logs (user_id, message, bot_response, context)
-      VALUES (${userId}, '/start', ${message}, 'start_command')
-    `
+  try {
+    // Save user info if not exists
+    if (userId) {
+      await supabase
+        .from('users')
+        .upsert({
+          id: userId,
+          username,
+          first_name: firstName,
+          last_name: lastName
+        })
+    }
+    
+    // Log interaction
+    await supabase
+      .from('chat_logs')
+      .insert({
+        user_id: userId,
+        message: '/start',
+        bot_response: message,
+        context: 'start_command'
+      })
+    
+    await ctx.reply(message)
+  } catch (error) {
+    console.error('Error in start command:', error)
+    await ctx.reply("Извините, произошла ошибка. Попробуйте позже.")
   }
 })
 
 // Handle messages
-bot.on('message', async (ctx) => {
+bot.on("message", async (ctx) => {
   const userId = ctx.from?.id
   const userMessage = ctx.message?.text || ''
-  let botResponse = 'Извините, я вас не понял.'
-
-  // Search in knowledge base
-  const result = await dbClient.queryObject`
-    SELECT answer 
-    FROM knowledge_base 
-    WHERE question ILIKE ${'%' + userMessage + '%'}
-    LIMIT 1
-  `
-
-  if (result.rows.length > 0) {
-    botResponse = result.rows[0].answer
+  
+  try {
+    // Log incoming message
+    await supabase
+      .from('chat_logs')
+      .insert({
+        user_id: userId,
+        message: userMessage,
+        context: 'user_message'
+      })
+    
+    // Default response
+    const response = "Я получил ваше сообщение! Скоро научусь на него отвечать "
+    
+    await ctx.reply(response)
+    
+    // Log bot response
+    await supabase
+      .from('chat_logs')
+      .update({ bot_response: response })
+      .eq('user_id', userId)
+      .is('bot_response', null)
+  } catch (error) {
+    console.error('Error processing message:', error)
+    await ctx.reply("Извините, произошла ошибка. Попробуйте позже.")
   }
-
-  await ctx.reply(botResponse)
-
-  // Log the interaction
-  if (userId) {
-    await dbClient.queryObject`
-      INSERT INTO chat_logs (user_id, message, bot_response, context)
-      VALUES (${userId}, ${userMessage}, ${botResponse}, 'message')
-    `
-  }
-})
-
-// Handle errors
-bot.catch((err) => {
-  console.error('Error in bot:', err)
 })
 
 // Create webhook handler
-const handleUpdate = webhookCallback(bot, 'std/http')
+const handleUpdate = webhookCallback(bot, "std/http")
 
-// Serve webhook handler
-Deno.serve(async (req) => {
+serve(async (req) => {
   try {
-    const url = new URL(req.url)
-    if (url.pathname.slice(1) === bot.token) {
-      try {
-        return await handleUpdate(req)
-      } catch (err) {
-        console.error(err)
-        return new Response('Webhook Error')
-      }
+    // Handle Telegram webhook
+    if (req.method === "POST") {
+      const response = await handleUpdate(req)
+      return response
     }
-    return new Response('Not found', { status: 404 })
-  } catch (err) {
-    console.error(err)
-    return new Response('Internal Server Error', { status: 500 })
-  } finally {
-    // Don't close the connection as it's reused between requests
-    // await dbClient.end()
+    
+    // Handle other requests
+    return new Response("Hello from Telegram bot!", { status: 200 })
+  } catch (error) {
+    console.error("Error in webhook handler:", error)
+    return new Response("Error processing request", { status: 500 })
   }
 })
-
-/* To invoke locally:
-
-  1. Run `supabase start` (see: https://supabase.com/docs/reference/cli/supabase-start)
-  2. Make an HTTP request:
-
-  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/telegram-bot' \
-    --header 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0' \
-    --header 'Content-Type: application/json' \
-    --data '{"name":"Functions"}'
-
-*/
