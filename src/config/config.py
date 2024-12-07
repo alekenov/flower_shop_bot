@@ -6,7 +6,7 @@ class Config:
         # Загружаем переменные окружения из .env файла
         env_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-            '.env.example'
+            '.env'
         )
         load_dotenv(env_path)
         
