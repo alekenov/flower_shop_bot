@@ -24,10 +24,20 @@ jobs:
         with:
           version: latest
 
+      - name: Debug Info
+        run: |
+          echo "Node version: $(node -v)"
+          echo "Supabase CLI version: $(supabase -v)"
+          echo "Project ID exists: ${{ secrets.PROJECT_ID != '' }}"
+          echo "Token exists: ${{ secrets.TELEGRAM_BOT_TOKEN != '' }}"
+
       - name: Set Function Secrets
         run: |
           supabase secrets set --project-ref "$PROJECT_ID" TELEGRAM_BOT_TOKEN="$TELEGRAM_BOT_TOKEN"
 
       - name: Deploy Edge Function
         run: |
-          supabase functions deploy telegram-bot --project-ref "$PROJECT_ID" --no-verify-jwt
+          supabase functions deploy telegram-bot \
+            --project-ref "$PROJECT_ID" \
+            --no-verify-jwt \
+            --debug
