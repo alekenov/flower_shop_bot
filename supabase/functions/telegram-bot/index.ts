@@ -14,7 +14,7 @@ const bot = new Bot(token)
 // Handle the /start command
 bot.command("start", async (ctx) => {
   try {
-    await ctx.reply("Welcome to the Flower Shop Bot! 🌸")
+    await ctx.reply("Welcome to the Flower Shop Bot! 🌸\nHow can I help you today?")
   } catch (error) {
     console.error("Error in /start command:", error)
     await ctx.reply("Sorry, there was an error processing your command.")
@@ -48,8 +48,7 @@ serve(async (req) => {
     console.error("Error in webhook handler:", err)
     return new Response("Internal Server Error", { 
       status: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ error: err.message })
+      headers: { "Content-Type": "application/json" }
     })
   }
 })
