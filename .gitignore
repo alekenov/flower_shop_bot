@@ -44,3 +44,4 @@ venv/
 src/config/credentials/
 *.json
 !.env.example
+!import_map.json
