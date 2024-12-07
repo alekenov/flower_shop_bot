@@ -1,17 +1,34 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts"
 import { Bot, webhookCallback } from "https://deno.land/x/grammy@v1.17.1/mod.ts"
+import { config } from "./config.ts"
+
+// Ensure required environment variables are set
+const token = Deno.env.get("TELEGRAM_BOT_TOKEN")
+if (!token) {
+  throw new Error("TELEGRAM_BOT_TOKEN is required")
+}
 
 // Initialize bot with your authentication token
-const bot = new Bot(Deno.env.get("TELEGRAM_BOT_TOKEN") || "")
+const bot = new Bot(token)
 
 // Handle the /start command
 bot.command("start", async (ctx) => {
-  await ctx.reply("Welcome to the Flower Shop Bot! 🌸")
+  try {
+    await ctx.reply("Welcome to the Flower Shop Bot! 🌸")
+  } catch (error) {
+    console.error("Error in /start command:", error)
+    await ctx.reply("Sorry, there was an error processing your command.")
+  }
 })
 
 // Handle text messages
 bot.on("message:text", async (ctx) => {
-  await ctx.reply("Thank you for your message! Our team will get back to you soon.")
+  try {
+    await ctx.reply("Thank you for your message! Our team will get back to you soon.")
+  } catch (error) {
+    console.error("Error in message handler:", error)
+    await ctx.reply("Sorry, there was an error processing your message.")
+  }
 })
 
 // Create webhook handler
@@ -19,13 +36,20 @@ const handleUpdate = webhookCallback(bot, "std/http")
 
 serve(async (req) => {
   try {
-    const url = new URL(req.url)
-    if (url.pathname.slice(1) === bot.token) {
-      return await handleUpdate(req)
+    if (req.method === "POST") {
+      const url = new URL(req.url)
+      if (url.pathname === config.path) {
+        return await handleUpdate(req)
+      }
     }
+    
     return new Response("Not found", { status: 404 })
   } catch (err) {
-    console.error(err)
-    return new Response("Internal Server Error", { status: 500 })
+    console.error("Error in webhook handler:", err)
+    return new Response("Internal Server Error", { 
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ error: err.message })
+    })
   }
 })
