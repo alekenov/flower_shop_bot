@@ -5,6 +5,7 @@ import { config } from "./config.ts"
 // Ensure required environment variables are set
 const token = Deno.env.get("TELEGRAM_BOT_TOKEN")
 if (!token) {
+  console.error("TELEGRAM_BOT_TOKEN environment variable is not set")
   throw new Error("TELEGRAM_BOT_TOKEN is required")
 }
 
@@ -14,6 +15,7 @@ const bot = new Bot(token)
 // Handle the /start command
 bot.command("start", async (ctx) => {
   try {
+    console.log("Handling /start command")
     await ctx.reply("Welcome to the Flower Shop Bot! 🌸\nI'm here to help you with your floral needs!")
   } catch (error) {
     console.error("Error in /start command:", error)
@@ -24,6 +26,7 @@ bot.command("start", async (ctx) => {
 // Handle text messages
 bot.on("message:text", async (ctx) => {
   try {
+    console.log("Handling text message:", ctx.message.text)
     await ctx.reply("Thank you for your message! Our team will get back to you soon. 🌺")
   } catch (error) {
     console.error("Error in message handler:", error)
@@ -38,6 +41,7 @@ serve(async (req) => {
   try {
     if (req.method === "POST") {
       const url = new URL(req.url)
+      console.log("Received webhook request at path:", url.pathname)
       if (url.pathname === config.path) {
         return await handleUpdate(req)
       }
