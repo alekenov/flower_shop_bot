@@ -1,8 +1,7 @@
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google.oauth2 import service_account
-from config.config import Config
 import logging
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from ..config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ class GoogleSheetsService:
     def _setup_service(self):
         """Инициализация сервиса Google Sheets"""
         try:
-            credentials = service_account.Credentials.from_service_account_file(
+            credentials = Credentials.from_service_account_file(
                 self.config.GOOGLE_SHEETS_CREDENTIALS_FILE, 
                 scopes=self.SCOPES
             )

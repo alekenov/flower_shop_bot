@@ -1,10 +1,11 @@
-from openai import OpenAI
-from src.config.config import Config
+import logging
+import openai
+from ..config.config import Config
 
 class OpenAIService:
     def __init__(self):
         config = Config()
-        self.client = OpenAI(api_key=config.OPENAI_API_KEY)
+        self.client = openai.OpenAI(api_key=config.OPENAI_API_KEY)
         
         # Базовый промпт для бота
         self.system_prompt = """

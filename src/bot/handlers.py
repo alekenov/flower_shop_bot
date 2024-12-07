@@ -1,8 +1,9 @@
 import logging
 from telegram import Update
 from telegram.ext import ContextTypes
-from src.services.openai_service import OpenAIService
-from src.services.sheets_service import GoogleSheetsService
+from ..services.openai_service import OpenAIService
+from ..services.sheets_service import GoogleSheetsService
+from .keyboards import get_main_keyboard
 
 logger = logging.getLogger(__name__)
 openai_service = OpenAIService()
@@ -19,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏰ Графиком работы\n\n"
         "Чем могу помочь?"
     )
-    await update.message.reply_text(welcome_message)
+    await update.message.reply_text(welcome_message, reply_markup=get_main_keyboard())
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
@@ -46,7 +47,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Сохраняем диалог в Google Sheets
         sheets_service.log_conversation(user_id, user_message, response)
         
-        await update.message.reply_text(response)
+        await update.message.reply_text(response, reply_markup=get_main_keyboard())
         
     except Exception as e:
         logger.error(f"Error processing message: {e}")

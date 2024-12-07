@@ -1,8 +1,14 @@
 import logging
+import sys
+import os
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
-from config.config import Config
-from bot.handlers import start, help_command, handle_message
-from utils.logger import setup_logger
+
+# Добавляем корневую директорию в PYTHONPATH
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.config.config import Config
+from src.bot.handlers import start, help_command, handle_message
+from src.utils.logger import setup_logger
 
 def main():
     # Настройка логирования
