@@ -39,19 +39,9 @@ class ChannelLogger:
                         parse_mode=ParseMode.HTML
                     )
                     logger.info(f"Message sent successfully: {result.message_id}")
-                    # Убираем установку реакций, так как это вызывает ошибку
-                    # await self.bot.set_message_reaction(
-                    #     chat_id=self.log_channel_id,
-                    #     message_id=result.message_id,
-                    #     reaction=[
-                    #         ReactionTypeEmoji("👍"),
-                    #         ReactionTypeEmoji("👎")
-                    #     ]
-                    # )
                     await asyncio.sleep(0.1)
                 except Exception as e:
                     logger.error(f"Failed to send message to channel: {str(e)}")
-                    # Попробуем отправить сообщение об ошибке в канал
                     try:
                         error_message = (
                             "⚠️ Error in bot logging system:\n"
@@ -71,22 +61,15 @@ class ChannelLogger:
             self._is_processing = False
             logger.info("Finished processing message queue")
     
-    async def log_interaction(self, user_id: int, username: str, question: str, answer: str, response_type: str = "Normal"):
-        """Log bot interaction to the Telegram channel."""
+    async def log_interaction(self, user_id: int, username: str, message: str, response: str):
+        """Log user interaction to the channel."""
         try:
-            logger.info(f"Preparing to log interaction for user {user_id}")
-            
-            # Format the message
             message = (
-                f"🤖 Bot Interaction Log\n\n"
-                f"👤 User: {username} (ID: {user_id})\n"
-                f"❓ Question:\n{question}\n\n"
-                f"✍️ Answer:\n{answer}\n\n"
-                f"📊 Response Type: {response_type}\n"
-                f"-----------------------------------"
+                f"👤 User: {username} (ID: {user_id})\n\n"
+                f"📝 Message:\n{message}\n\n"
+                f"🤖 Response:\n{response}"
             )
             
-            # Try direct send first
             try:
                 logger.info("Attempting direct message send")
                 sent_message = await self.bot.send_message(
@@ -95,19 +78,10 @@ class ChannelLogger:
                     parse_mode=ParseMode.HTML
                 )
                 logger.info("Direct message send successful")
-                # await self.bot.set_message_reaction(
-                #     chat_id=self.log_channel_id,
-                #     message_id=sent_message.message_id,
-                #     reaction=[
-                #         ReactionTypeEmoji("👍"),
-                #         ReactionTypeEmoji("👎")
-                #     ]
-                # )
                 return
             except Exception as e:
                 logger.error(f"Direct send failed, will try queue: {e}")
             
-            # If direct send failed, try queue
             logger.info("Adding message to queue")
             await self._message_queue.put(message)
             logger.info("Creating queue processing task")

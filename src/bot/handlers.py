@@ -12,7 +12,7 @@ from src.services.channel_logger import ChannelLogger
 logger = logging.getLogger(__name__)
 
 # Инициализация сервисов
-# sheets_service = SheetsService()
+sheets_service = SheetsService()
 openai_service = OpenAIService()
 docs_service = DocsService()
 channel_logger = ChannelLogger()
@@ -61,75 +61,86 @@ async def get_channel_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
-        # Получаем информацию о товарах
-        # inventory = await sheets_service.get_inventory_data()
-        # inventory_info = sheets_service.format_inventory_for_openai(inventory)
+        user_message = update.message.text.lower()
+        logger.info(f"Получено сообщение: {user_message}")
         
-        # Получаем ответ от OpenAI
-        response = await openai_service.get_response(
-            update.message.text,
-            # inventory_info,
-            user_id=update.effective_user.id
-        )
+        # Проверяем, спрашивает ли пользователь о цене или наличии конкретных цветов
+        inventory_keywords = ['цена', 'стоит', 'стоят', 'наличие', 'есть', 'остались', 'купить']
         
-        # Фразы, указывающие на то, что бот не уверен или дает общий ответ
-        uncertain_phrases = [
-            "извините",
-            "не могу",
-            "не знаю",
-            "затрудняюсь",
-            "обратитесь к менеджеру",
-            "свяжитесь с менеджером",
-            "напишите менеджеру",
-            "хороший вопрос",
-            "интересный вопрос",
-            "отличный вопрос",
-            "давайте уточним",
-            "могу предложить альтернативу",
-            "для уточнения деталей",
-            "индивидуальное решение",
-            "специальные условия"
-        ]
-        
-        # Определяем тип ответа для записи в документ
-        response_type = "Normal"
-        if any(phrase in response.lower() for phrase in ["извините", "не могу", "не знаю"]):
-            response_type = "Нет ответа"
-        elif any(phrase in response.lower() for phrase in uncertain_phrases):
-            response_type = "Неточный ответ"
-        
-        if any(phrase in response.lower() for phrase in uncertain_phrases):
+        if any(keyword in user_message for keyword in inventory_keywords):
+            logger.info("Обнаружен вопрос о ценах/наличии")
             try:
-                # Добавляем вопрос в Google Docs
-                await docs_service.add_unanswered_question(
-                    question=update.message.text,
-                    user_id=update.effective_user.id,
-                    bot_response=response,
-                    response_type=response_type
-                )
-                logger.info(f"Added question to Google Docs: {update.message.text} (Type: {response_type})")
+                # Получаем данные из Google Sheets
+                inventory = await sheets_service.get_inventory_data()
+                logger.info(f"Получены данные из таблицы: {inventory}")
+                
+                # Ищем упоминания конкретных цветов в сообщении
+                mentioned_flowers = []
+                for item in inventory:
+                    name_parts = item['name'].lower().split()
+                    category_parts = item['category'].lower().split()
+                    
+                    # Проверяем каждое слово из названия и категории
+                    all_parts = name_parts + category_parts
+                    if any(part in user_message for part in all_parts):
+                        mentioned_flowers.append(item)
+                
+                if mentioned_flowers:
+                    # Если спрашивают про конкретные цветы
+                    response = ""
+                    for flower in mentioned_flowers:
+                        status = "в наличии" if flower['quantity'] > 0 else "нет в наличии"
+                        response += f"🌸 {flower['name']}:\n"
+                        response += f"   • Цена: {flower['price']}\n"
+                        if flower['description']:
+                            response += f"   • {flower['description']}\n"
+                        response += f"   • Статус: {status}\n\n"
+                elif "что" in user_message and "наличии" in user_message:
+                    # Если спрашивают что есть в наличии
+                    available_flowers = [item for item in inventory if item['quantity'] > 0]
+                    if available_flowers:
+                        response = "В нашем магазине сейчас в наличии:\n\n"
+                        for flower in available_flowers:
+                            response += f"🌸 {flower['name']}\n"
+                            response += f"   • Цена: {flower['price']}\n"
+                            if flower['description']:
+                                response += f"   • {flower['description']}\n"
+                            response += "\n"
+                    else:
+                        response = "К сожалению, сейчас все цветы распроданы. Новое поступление ожидается в ближайшее время."
+                else:
+                    # Если цветы не найдены в сообщении
+                    response = await openai_service.get_response(
+                        update.message.text,
+                        user_id=update.effective_user.id
+                    )
             except Exception as e:
-                logger.error(f"Failed to add question to Google Docs: {e}")
-        
-        # Log to Telegram channel
-        try:
-            username = update.effective_user.username or str(update.effective_user.id)
-            await channel_logger.log_interaction(
-                user_id=update.effective_user.id,
-                username=username,
-                question=update.message.text,
-                answer=response,
-                response_type=response_type
+                logger.error(f"Ошибка при получении данных из таблицы: {e}")
+                response = await openai_service.get_response(
+                    update.message.text,
+                    user_id=update.effective_user.id
+                )
+        else:
+            logger.info("Обычный вопрос, используем OpenAI")
+            response = await openai_service.get_response(
+                update.message.text,
+                user_id=update.effective_user.id
             )
-        except Exception as e:
-            logger.error(f"Failed to log to Telegram channel: {e}")
         
         # Отправляем ответ пользователю
         await update.message.reply_text(response)
         
+        # Логируем взаимодействие
+        await channel_logger.log_interaction(
+            user_id=update.effective_user.id,
+            username=update.effective_user.username,
+            message=update.message.text,
+            response=response
+        )
+        
     except Exception as e:
-        logger.error(f"Error handling message: {e}")
-        error_message = "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже."
+        error_message = "Извините, произошла ошибка. Попробуйте повторить запрос позже."
+        logger.error(f"Error in handle_message: {e}")
         await update.message.reply_text(error_message)
 
 # Удаляем неправильно размещенные обработчики
