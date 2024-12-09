@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.config.config import Config
+from src.temp_config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -131,40 +131,140 @@ class DocsService:
         try:
             initial_content = """# База знаний Cvety.kz 🌸
 
-## Активные вопросы
-[Новые вопросы будут добавляться здесь автоматически]
+## 1. Основная информация о магазине
+### Часы работы
+- Магазин работает ежедневно с 9:00 до 21:00
+- Доставка осуществляется с 9:00 до 20:00
+- Прием заказов круглосуточно через бота
 
----
+### Контакты
+- Телефон: +7 (XXX) XXX-XX-XX
+- Email: info@cvety.kz
+- Instagram: @cvety.kz
+- Telegram: @cvetykz_bot
 
-## Обработанные вопросы и ответы
+### Локации
+- Главный магазин: [адрес]
+- Пункты выдачи: [адреса]
 
-### 1. Заказы и доставка
-В: Как сделать заказ?
-О: Просто напишите боту, какие цветы вы хотите заказать. Бот поможет выбрать цветы, укажет цены и оформит заказ.
+## 2. Каталог и цены
+### 2.1 Розы
+#### Виды роз
+- Классические розы (40, 50, 60, 70 см)
+- Пионовидные розы
+- Кустовые розы
+- Премиум сорта
 
-В: Какие способы доставки доступны?
-О: Мы доставляем цветы по всему городу с 9:00 до 21:00. Доставка осуществляется в течение 2-3 часов после оформления заказа.
+#### Цены на розы
+- 40 см: от X тенге/шт
+- 50 см: от X тенге/шт
+- 60 см: от X тенге/шт
+- 70 см: от X тенге/шт
 
-### 2. Ассортимент и цены
-В: Как узнать, какие цветы есть в наличии?
-О: Напишите боту "покажи ассортимент" или "какие цветы есть?", и он покажет актуальный список цветов с ценами.
+#### Особенности
+- Свежие поставки каждый день
+- Гарантия свежести 7 дней
+- Возможность выбора цвета
 
-В: Можно ли заказать букет заранее?
-О: Да, вы можете оформить предварительный заказ. Укажите боту желаемую дату и время доставки при оформлении заказа.
+### 2.2 Букеты
+#### Категории букетов
+- Монобукеты из роз
+- Смешанные букеты
+- Авторские композиции
+- Букеты на праздники
 
-### 3. Оплата
-В: Какие способы оплаты доступны?
-О: Принимаем оплату наличными при доставке и банковскими картами через бот.
+#### Ценовые диапазоны
+- Экономичные: до X тенге
+- Стандарт: X-Y тенге
+- Премиум: от Y тенге
 
-В: Когда нужно оплачивать заказ?
-О: При оформлении заказа через бот. Мы начинаем готовить букет после подтверждения оплаты.
+### 2.3 Комнатные растения
+- Виды растений
+- Уход и рекомендации
+- Цены и доставка
 
-### 4. Дополнительные услуги
-В: Можно ли добавить к букету открытку?
-О: Да, при оформлении заказа вы можете добавить открытку с вашим текстом бесплатно.
+### 2.4 Сезонные предложения
+[Обновляется автоматически]
 
-В: Есть ли упаковка для букетов?
-О: Все наши букеты красиво упаковываются по умолчанию. Доступны различные варианты упаковки на ваш выбор."""
+## 3. Доставка
+### 3.1 Стандартная доставка
+#### Зоны доставки
+- Центр города: X тенге
+- Спальные районы: Y тенге
+- Пригород: Z тенге
+
+#### Время доставки
+- В течение дня: 2-3 часа
+- Предварительный заказ: точное время
+
+### 3.2 Срочная доставка
+- Доставка за 1 час
+- Условия срочной доставки
+- Дополнительная стоимость
+
+### 3.3 Предварительные заказы
+- Бронирование даты и времени
+- Специальные условия
+- Гарантии доставки
+
+## 4. Оплата
+### Способы оплаты
+- Наличные при получении
+- Банковские карты
+- Kaspi переводы
+- Корпоративные счета
+
+### Условия оплаты
+- Предоплата для предварительных заказов
+- Оплата при получении
+- Корпоративные условия
+
+### Возврат и гарантии
+- Условия возврата
+- Гарантия свежести
+- Замена букета
+
+## 5. Специальные предложения
+### 5.1 Текущие акции
+[Обновляется еженедельно]
+
+### 5.2 Программа лояльности
+- Система баллов
+- Скидки постоянным клиентам
+- Особые условия
+
+### 5.3 Корпоративным клиентам
+- Специальные условия
+- Документооборот
+- Отсрочка платежа
+
+## 6. FAQ (Частые вопросы)
+[Автоматически обновляемый раздел]
+
+## 7. Активные вопросы
+[Новые вопросы для обработки]
+
+## 8. Примеры диалогов
+### 8.1 Стандартные ситуации
+#### Пример 1: Заказ букета
+В: Хочу заказать букет роз
+О: Конечно! Я помогу вам выбрать идеальный букет. Какой длины розы вы предпочитаете? У нас есть розы 40, 50, 60 и 70 см.
+
+#### Пример 2: Доставка
+В: Сколько стоит доставка в [район]?
+О: Доставка в [район] стоит X тенге. Среднее время доставки 2-3 часа. Хотите оформить заказ?
+
+### 8.2 Сложные случаи
+[Примеры решения нестандартных ситуаций]
+
+### 8.3 Успешные решения
+[Примеры особо удачных диалогов]
+
+## 9. Метаданные
+- Версия базы знаний: 1.0
+- Дата последнего обновления: [автообновление]
+- Количество обработанных вопросов: [автообновление]
+- Процент успешных ответов: [автообновление]"""
 
             requests = [
                 {
@@ -186,4 +286,150 @@ class DocsService:
             
         except Exception as e:
             logger.error(f"Failed to create initial structure: {e}")
+            raise
+
+    async def get_section_content(self, section_title: str) -> str:
+        """Получение содержимого конкретного раздела."""
+        try:
+            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
+            content = doc.get('body', {}).get('content', [])
+            
+            section_start = self._find_section_index(doc, section_title)
+            if section_start == -1:
+                logger.error(f"Section {section_title} not found")
+                return ""
+            
+            next_section_start = -1
+            full_text = ""
+            current_index = 1
+            
+            # Ищем следующий заголовок того же или более высокого уровня
+            for element in content:
+                if 'paragraph' in element:
+                    for part in element['paragraph'].get('elements', []):
+                        text = part.get('textRun', {}).get('content', '')
+                        if current_index > section_start and text.strip().startswith('#'):
+                            next_section_start = current_index
+                            break
+                        current_index += len(text)
+            
+            # Получаем текст раздела
+            current_index = 1
+            is_in_section = False
+            for element in content:
+                if 'paragraph' in element:
+                    for part in element['paragraph'].get('elements', []):
+                        text = part.get('textRun', {}).get('content', '')
+                        if current_index == section_start:
+                            is_in_section = True
+                        if next_section_start != -1 and current_index >= next_section_start:
+                            is_in_section = False
+                        if is_in_section:
+                            full_text += text
+                        current_index += len(text)
+            
+            return full_text.strip()
+            
+        except Exception as e:
+            logger.error(f"Failed to get section content: {e}")
+            raise
+
+    async def update_section(self, section_title: str, new_content: str):
+        """Обновление содержимого раздела."""
+        try:
+            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
+            section_start = self._find_section_index(doc, section_title)
+            
+            if section_start == -1:
+                logger.error(f"Section {section_title} not found")
+                return
+            
+            # Находим конец раздела
+            content = doc.get('body', {}).get('content', [])
+            next_section_start = -1
+            current_index = 1
+            
+            for element in content:
+                if 'paragraph' in element:
+                    for part in element['paragraph'].get('elements', []):
+                        text = part.get('textRun', {}).get('content', '')
+                        if current_index > section_start and text.strip().startswith('#'):
+                            next_section_start = current_index
+                            break
+                        current_index += len(text)
+            
+            # Создаем запросы на обновление
+            requests = []
+            
+            # Если нашли следующий раздел, удаляем текущий контент
+            if next_section_start != -1:
+                requests.append({
+                    'deleteContentRange': {
+                        'range': {
+                            'startIndex': section_start + len(section_title) + 1,
+                            'endIndex': next_section_start
+                        }
+                    }
+                })
+            
+            # Добавляем новый контент
+            requests.append({
+                'insertText': {
+                    'location': {
+                        'index': section_start + len(section_title) + 1
+                    },
+                    'text': f"\n{new_content}\n"
+                }
+            })
+            
+            # Выполняем запросы
+            result = self.service.documents().batchUpdate(
+                documentId=self.knowledge_base_doc_id,
+                body={'requests': requests}
+            ).execute()
+            
+            logger.info(f"Successfully updated section {section_title}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to update section: {e}")
+            raise
+
+    async def add_faq_item(self, question: str, answer: str):
+        """Добавление нового вопроса и ответа в раздел FAQ."""
+        try:
+            faq_content = await self.get_section_content("## 6. FAQ")
+            new_faq_item = f"\n### Вопрос: {question}\nОтвет: {answer}\n"
+            
+            if not faq_content:
+                new_content = new_faq_item
+            else:
+                new_content = faq_content + "\n" + new_faq_item
+            
+            await self.update_section("## 6. FAQ", new_content)
+            logger.info(f"Successfully added new FAQ item: {question}")
+            
+        except Exception as e:
+            logger.error(f"Failed to add FAQ item: {e}")
+            raise
+
+    async def update_metadata(self):
+        """Обновление метаданных документа."""
+        try:
+            current_time = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            
+            # Получаем текущую статистику
+            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
+            faq_content = await self.get_section_content("## 6. FAQ")
+            faq_count = faq_content.count("### Вопрос:")
+            
+            metadata_content = f"""- Версия базы знаний: 1.0
+- Дата последнего обновления: {current_time}
+- Количество FAQ: {faq_count}"""
+            
+            await self.update_section("## 9. Метаданные", metadata_content)
+            logger.info("Successfully updated metadata")
+            
+        except Exception as e:
+            logger.error(f"Failed to update metadata: {e}")
             raise

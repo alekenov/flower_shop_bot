@@ -6,7 +6,7 @@ class Config:
         # Загружаем переменные окружения из .env файла
         env_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-            '.env.example'
+            '.env'
         )
         load_dotenv(env_path)
         
@@ -25,10 +25,9 @@ class Config:
             self.PROJECT_ROOT,
             'src/config/credentials/google_sheets_credentials.json'
         )
-        self.GOOGLE_SHEETS_SPREADSHEET_ID = '1KIjFJppiwHXikFQrWz_7vKyDykA6LZ09rMH5-qIFBQk'
-
-        # Google Docs Knowledge Base
-        self.GOOGLE_DOCS_KNOWLEDGE_BASE_ID = '1KsRZZ1I2E45uXrRjYlwnwzCPM5faio6ohvjdgbnQExo'
+        # Обновляем ID документов
+        self.GOOGLE_SHEETS_SPREADSHEET_ID = self._get_env('GOOGLE_SHEETS_SPREADSHEET_ID')
+        self.GOOGLE_DOCS_KNOWLEDGE_BASE_ID = self._get_env('GOOGLE_DOCS_KNOWLEDGE_BASE_ID')
 
     def _get_env(self, key: str) -> str:
         """

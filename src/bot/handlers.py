@@ -12,7 +12,7 @@ from src.services.channel_logger import ChannelLogger
 logger = logging.getLogger(__name__)
 
 # Инициализация сервисов
-sheets_service = SheetsService()
+# sheets_service = SheetsService()
 openai_service = OpenAIService()
 docs_service = DocsService()
 channel_logger = ChannelLogger()
@@ -62,13 +62,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
         # Получаем информацию о товарах
-        inventory = await sheets_service.get_inventory_data()
-        inventory_info = sheets_service.format_inventory_for_openai(inventory)
+        # inventory = await sheets_service.get_inventory_data()
+        # inventory_info = sheets_service.format_inventory_for_openai(inventory)
         
         # Получаем ответ от OpenAI
         response = await openai_service.get_response(
             update.message.text,
-            inventory_info,
+            # inventory_info,
             user_id=update.effective_user.id
         )
         
