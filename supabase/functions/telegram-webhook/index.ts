@@ -11,6 +11,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { TelegramClient } from './telegram.ts'
 import { OpenAIClient } from './openai.ts'
 import { Logger, LogLevel, LogCategory } from './logger.ts'
+import { ChannelLogger } from './channel_logger.ts'
 
 interface TelegramUpdate {
   update_id: number
@@ -77,8 +78,14 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
     const logger = new Logger(supabase);
-    const openai = new OpenAIClient(openaiKey, supabase);
     const telegramClient = new TelegramClient(telegramToken);
+    const openai = new OpenAIClient(openaiKey, supabase);
+    
+    // Инициализируем логгер для канала
+    const channelLogger = new ChannelLogger(
+      telegramClient,
+      Deno.env.get('TELEGRAM_LOG_CHANNEL_ID') || ''
+    );
 
     console.log('Clients initialized');
 
@@ -169,6 +176,14 @@ serve(async (req) => {
             text: response
           });
           console.log('Message sent to Telegram');
+
+          // Логируем в канал
+          await channelLogger.logInteraction(
+            userId || 0,
+            userName || 'Anonymous',
+            messageText,
+            response
+          );
           
           // Логируем успешную обработку
           logger.info(LogCategory.OPENAI, 'Successfully processed message', { 
