@@ -21,11 +21,6 @@ class Config:
         self.OPENAI_API_KEY = self._get_env('OPENAI_API_KEY')
         
         # Google Sheets
-        self.GOOGLE_SHEETS_CREDENTIALS_FILE = os.path.join(
-            self.PROJECT_ROOT,
-            'src/config/credentials/google_sheets_credentials.json'
-        )
-        # Обновляем ID документов
         self.GOOGLE_SHEETS_SPREADSHEET_ID = self._get_env('GOOGLE_SHEETS_SPREADSHEET_ID')
         self.GOOGLE_DOCS_KNOWLEDGE_BASE_ID = self._get_env('GOOGLE_DOCS_KNOWLEDGE_BASE_ID')
 

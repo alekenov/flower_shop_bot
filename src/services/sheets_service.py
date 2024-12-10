@@ -1,5 +1,7 @@
 import os
+import json
 import logging
+import psycopg2
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -16,11 +18,8 @@ class SheetsService:
         try:
             config = Config()
             self.spreadsheet_id = config.GOOGLE_SHEETS_SPREADSHEET_ID
-            self.credentials_file = config.GOOGLE_SHEETS_CREDENTIALS_FILE
             
-            logger.info(f"Initializing Google Sheets service with:")
-            logger.info(f"- Spreadsheet ID: {self.spreadsheet_id}")
-            logger.info(f"- Credentials file: {self.credentials_file}")
+            logger.info(f"Initializing Google Sheets service with spreadsheet ID: {self.spreadsheet_id}")
             
             # Load credentials
             self.credentials = self._load_credentials()
@@ -41,18 +40,38 @@ class SheetsService:
             logger.error(f"Failed to initialize Google Sheets service: {str(e)}", exc_info=True)
             raise
 
-    def _load_credentials(self):
-        """Load Google Sheets credentials from the credentials file."""
+    def _get_credentials_from_db(self):
+        """Get Google credentials from Supabase database."""
+        conn = psycopg2.connect(
+            host="aws-0-eu-central-1.pooler.supabase.com",
+            database="postgres",
+            user="postgres.dkohweivbdwweyvyvcbc",
+            password="vigkif-nesJy2-kivraq",
+            port="6543"
+        )
         try:
-            logger.info(f"Loading credentials from file: {self.credentials_file}")
-            return service_account.Credentials.from_service_account_file(
-                self.credentials_file,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']  # Full access to sheets
+            with conn.cursor() as cur:
+                cur.execute("SELECT credentials FROM google_credentials ORDER BY created_at DESC LIMIT 1;")
+                result = cur.fetchone()
+                if result:
+                    return result[0]
+                raise Exception("No credentials found in database")
+        finally:
+            conn.close()
+
+    def _load_credentials(self):
+        """Load Google Sheets credentials from database."""
+        try:
+            logger.info("Loading credentials from database")
+            credentials_info = self._get_credentials_from_db()
+            return service_account.Credentials.from_service_account_info(
+                credentials_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
             )
         except Exception as e:
             logger.error(f"Failed to load credentials: {str(e)}", exc_info=True)
             raise
-    
+
     def _verify_access(self):
         """Verify access to the spreadsheet."""
         try:
@@ -73,18 +92,36 @@ class SheetsService:
             logger.error(f"Failed to get sheet names: {str(e)}", exc_info=True)
             raise
 
-    def get_inventory_data(self):
+    async def get_inventory_data(self):
         """Get inventory data from Google Sheets."""
         try:
             logger.info(f"Getting inventory data from spreadsheet {self.spreadsheet_id}")
             
-            result = self.service.spreadsheets().values().get(
-                spreadsheetId=self.spreadsheet_id,
-                range='Catalog!A2:E'
-            ).execute()
+            # Получаем все листы, чтобы найти нужный
+            sheets = self._get_sheet_names()
+            logger.info(f"Available sheets: {sheets}")
             
-            values = result.get('values', [])
+            # Пробуем разные варианты названия листа
+            possible_ranges = ['Catalog!A2:E', 'Sheet1!A2:E', 'Лист1!A2:E', 'Каталог!A2:E']
+            values = []
+            
+            for sheet_range in possible_ranges:
+                try:
+                    logger.info(f"Trying to read from range: {sheet_range}")
+                    result = self.service.spreadsheets().values().get(
+                        spreadsheetId=self.spreadsheet_id,
+                        range=sheet_range
+                    ).execute()
+                    values = result.get('values', [])
+                    if values:
+                        logger.info(f"Successfully read data from {sheet_range}")
+                        break
+                except Exception as e:
+                    logger.warning(f"Could not read from {sheet_range}: {e}")
+                    continue
+            
             logger.info(f"Retrieved {len(values)} rows from spreadsheet")
+            logger.info(f"Raw data from sheets: {values}")
             
             if not values:
                 logger.warning("No data found in spreadsheet")
@@ -95,15 +132,18 @@ class SheetsService:
                 try:
                     if len(row) >= 3:
                         item = {
-                            'name': row[0],
-                            'quantity': int(row[1]) if row[1].isdigit() else 0,
-                            'price': str(float(row[2])) + " тенге" if row[2].replace('.', '').isdigit() else "0 тенге",
-                            'description': row[3] if len(row) > 3 else '',
+                            'name': row[0].strip(),
+                            'quantity': int(row[1]) if row[1].strip().isdigit() else 0,
+                            'price': str(float(row[2].strip())) + " тенге" if row[2].strip().replace('.', '').isdigit() else "0 тенге",
+                            'description': row[3].strip() if len(row) > 3 else '',
                         }
+                        logger.info(f"Processed row {i}: {item}")
                         inventory.append(item)
                 except Exception as e:
                     logger.error(f"Error processing row {i}: {e}", exc_info=True)
+                    logger.error(f"Problematic row data: {row}")
             
+            logger.info(f"Final processed inventory: {inventory}")
             return inventory
             
         except Exception as e:
@@ -112,31 +152,111 @@ class SheetsService:
 
     def format_inventory_for_openai(self, inventory):
         """Format inventory data for OpenAI prompt."""
-        if not inventory:
-            return "В данный момент информация о товарах недоступна."
-        
-        formatted_info = "Актуальная информация о товарах:\n\n"
-        for item in inventory:
-            formatted_info += f"- {item['name']}:\n"
-            formatted_info += f"  Количество: {item['quantity']} шт.\n"
-            formatted_info += f"  Цена: {item['price']}\n"
-            if 'description' in item:
-                formatted_info += f"  Описание: {item['description']}\n"
-            formatted_info += "\n"
-        
-        return formatted_info
+        try:
+            if not inventory:
+                logger.warning("No inventory data to format")
+                return "В данный момент информация о товарах недоступна."
+            
+            logger.info(f"Formatting inventory data: {inventory}")
+            
+            # Убираем дубликаты и объединяем количество для одинаковых товаров
+            consolidated_inventory = {}
+            for item in inventory:
+                name = item['name'].lower()  # Приводим к нижнему регистру для объединения
+                if name not in consolidated_inventory:
+                    consolidated_inventory[name] = {
+                        'name': item['name'],  # Сохраняем оригинальное название
+                        'quantity': int(item['quantity']),
+                        'price': item['price'],
+                        'description': item.get('description', '')
+                    }
+                else:
+                    consolidated_inventory[name]['quantity'] += int(item['quantity'])
+            
+            logger.info(f"Consolidated inventory: {consolidated_inventory}")
+            
+            formatted_info = "Актуальный список цветов в наличии:\n\n"
+            for item in consolidated_inventory.values():
+                if item['quantity'] > 0:  # Показываем только товары в наличии
+                    formatted_info += f"{item['name']}: {item['quantity']} шт., {item['price']}"
+                    if item['description']:
+                        formatted_info += f" ({item['description']})"
+                    formatted_info += "\n"
+            
+            logger.info(f"Formatted inventory info: {formatted_info}")
+            return formatted_info
+            
+        except Exception as e:
+            logger.error(f"Error formatting inventory data: {e}", exc_info=True)
+            return "Произошла ошибка при форматировании данных о товарах."
 
-    async def update_inventory_item(self, item_name: str, updates: dict):
-        """Update inventory item data in Google Sheets.
+    def _validate_item_data(self, item_data: dict) -> tuple[bool, str]:
+        """Validate item data before updating or adding to sheets.
         
         Args:
-            item_name (str): Name of the item to update
-            updates (dict): Dictionary containing updates (quantity, price, etc.)
+            item_data (dict): Dictionary containing item data to validate
+            
+        Returns:
+            tuple[bool, str]: (is_valid, error_message)
         """
+        try:
+            required_fields = ['name']
+            for field in required_fields:
+                if field not in item_data or not item_data[field]:
+                    return False, f"Missing required field: {field}"
+            
+            if 'quantity' in item_data:
+                try:
+                    quantity = int(item_data['quantity'])
+                    if quantity < 0:
+                        return False, "Quantity cannot be negative"
+                except ValueError:
+                    return False, "Quantity must be a valid number"
+            
+            if 'price' in item_data:
+                try:
+                    price = float(str(item_data['price']).replace(' тенге', ''))
+                    if price < 0:
+                        return False, "Price cannot be negative"
+                except ValueError:
+                    return False, "Price must be a valid number"
+            
+            return True, ""
+        except Exception as e:
+            logger.error(f"Error validating item data: {str(e)}", exc_info=True)
+            return False, f"Validation error: {str(e)}"
+
+    def _get_row_hash(self, row: list) -> str:
+        """Generate a hash for a row to detect changes.
+        
+        Args:
+            row (list): Row data to hash
+            
+        Returns:
+            str: Hash of the row data
+        """
+        import hashlib
+        row_str = '|'.join(str(cell) for cell in row)
+        return hashlib.md5(row_str.encode()).hexdigest()
+
+    def _get_version_sheet_name(self) -> str:
+        """Get the name of the version tracking sheet."""
+        from datetime import datetime
+        current_date = datetime.now().strftime('%Y_%m')
+        return f'Version_{current_date}'
+
+    async def update_inventory_item(self, item_name: str, updates: dict):
+        """Update inventory item data in Google Sheets."""
         try:
             logger.info(f"Updating inventory item: {item_name}")
             
-            # First, get the current inventory to find the row
+            # Validate updates
+            is_valid, error_msg = self._validate_item_data({'name': item_name, **updates})
+            if not is_valid:
+                logger.error(f"Invalid update data for {item_name}: {error_msg}")
+                return False
+            
+            # Get current inventory
             result = self.service.spreadsheets().values().get(
                 spreadsheetId=self.spreadsheet_id,
                 range='Catalog!A2:E'
@@ -145,10 +265,11 @@ class SheetsService:
             values = result.get('values', [])
             row_index = None
             
-            # Find the row with the matching item name
-            for i, row in enumerate(values, start=2):  
+            # Find the row and check if update is needed
+            for i, row in enumerate(values, start=2):
                 if row[0] == item_name:
                     row_index = i
+                    current_row = row
                     break
             
             if row_index is None:
@@ -156,7 +277,6 @@ class SheetsService:
                 return False
             
             # Prepare the update
-            current_row = values[row_index-2]  
             new_row = current_row.copy()
             
             # Update fields based on the updates dictionary
@@ -169,7 +289,27 @@ class SheetsService:
             if 'category' in updates:
                 new_row[4] = updates['category']
             
-            # Update the sheet
+            # Check if the data actually changed
+            if self._get_row_hash(current_row) == self._get_row_hash(new_row):
+                logger.info(f"No changes detected for item: {item_name}")
+                return True
+            
+            # Store the previous version
+            version_sheet = self._get_version_sheet_name()
+            self._ensure_version_sheet_exists(version_sheet)
+            
+            timestamp = datetime.now().isoformat()
+            version_row = [timestamp, item_name] + current_row[1:]
+            
+            # Append to version history
+            self.service.spreadsheets().values().append(
+                spreadsheetId=self.spreadsheet_id,
+                range=f'{version_sheet}!A:F',
+                valueInputOption='RAW',
+                body={'values': [version_row]}
+            ).execute()
+            
+            # Update the main sheet
             range_name = f'Catalog!A{row_index}:E{row_index}'
             body = {
                 'values': [new_row]
@@ -188,7 +328,41 @@ class SheetsService:
         except Exception as e:
             logger.error(f"Failed to update inventory item: {str(e)}", exc_info=True)
             return False
-    
+
+    def _ensure_version_sheet_exists(self, sheet_name: str):
+        """Ensure version tracking sheet exists with correct headers."""
+        try:
+            sheets = self._get_sheet_names()
+            if sheet_name not in sheets:
+                # Create new sheet
+                request = {
+                    'addSheet': {
+                        'properties': {
+                            'title': sheet_name
+                        }
+                    }
+                }
+                
+                self.service.spreadsheets().batchUpdate(
+                    spreadsheetId=self.spreadsheet_id,
+                    body={'requests': [request]}
+                ).execute()
+                
+                # Add headers
+                headers = [['Timestamp', 'Item Name', 'Quantity', 'Price', 'Description', 'Category']]
+                self.service.spreadsheets().values().update(
+                    spreadsheetId=self.spreadsheet_id,
+                    range=f'{sheet_name}!A1:F1',
+                    valueInputOption='RAW',
+                    body={'values': headers}
+                ).execute()
+                
+                logger.info(f"Created new version sheet: {sheet_name}")
+                
+        except Exception as e:
+            logger.error(f"Error ensuring version sheet exists: {str(e)}", exc_info=True)
+            raise
+
     async def add_inventory_item(self, item_data: dict):
         """Add a new item to the inventory.
         
@@ -198,6 +372,12 @@ class SheetsService:
         """
         try:
             logger.info(f"Adding new inventory item: {item_data.get('name')}")
+            
+            # Validate item data
+            is_valid, error_msg = self._validate_item_data(item_data)
+            if not is_valid:
+                logger.error(f"Invalid item data: {error_msg}")
+                return False
             
             # Prepare the new row
             new_row = [

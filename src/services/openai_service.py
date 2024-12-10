@@ -81,12 +81,21 @@ class OpenAIService:
         max_retries = 5
         base_retry_delay = 5  # начальная задержка в секундах
         
-        # Получаем релевантную информацию из базы знаний
-        try:
-            relevant_knowledge = await self.get_relevant_knowledge(user_message)
-        except Exception as e:
-            logger.error(f"Failed to get relevant knowledge: {e}")
+        logger.info(f"Processing message from user {user_id}: {user_message}")
+        logger.info(f"Inventory info: {inventory_info}")
+        
+        # Получаем релевантную информацию из базы знаний только для вопросов не о наличии/ценах
+        message_lower = user_message.lower()
+        if not any(word in message_lower for word in ['цена', 'стоит', 'сколько', 'рубл', 'тенге', 'есть', 'наличие', 'купить']):
+            try:
+                relevant_knowledge = await self.get_relevant_knowledge(user_message)
+                logger.info(f"Got relevant knowledge: {relevant_knowledge}")
+            except Exception as e:
+                logger.error(f"Failed to get relevant knowledge: {e}")
+                relevant_knowledge = ""
+        else:
             relevant_knowledge = ""
+            logger.info("Skipping knowledge base for inventory-related question")
         
         for attempt in range(max_retries):
             try:
@@ -95,16 +104,18 @@ class OpenAIService:
                     {"role": "system", "content": system_prompt}
                 ]
 
-                if relevant_knowledge:
-                    messages.append({
-                        "role": "system",
-                        "content": f"Актуальная информация из базы знаний:\n{relevant_knowledge}"
-                    })
-
+                # Сначала добавляем информацию о товарах
                 if inventory_info:
                     messages.append({
                         "role": "system",
                         "content": f"Актуальная информация о товарах:\n{inventory_info}"
+                    })
+                
+                # Затем добавляем информацию из базы знаний (если есть)
+                if relevant_knowledge:
+                    messages.append({
+                        "role": "system",
+                        "content": f"Дополнительная информация:\n{relevant_knowledge}"
                     })
                 
                 # Добавляем историю разговора
@@ -182,25 +193,26 @@ class OpenAIService:
     def _get_system_prompt(self):
         """Get the system prompt for OpenAI."""
         return """Ты - дружелюбный и профессиональный консультант цветочного магазина. 
-        
+
 Основные правила:
-1. Отвечай кратко и по существу
-2. Если спрашивают о конкретных цветах - уточняй детали (цвет, размер, количество)
-3. Если не знаешь точную информацию - не придумывай, а предложи альтернативы
-4. Всегда сохраняй профессиональный и дружелюбный тон
+1. ВСЕГДА используй ТОЛЬКО данные из inventory_info для информации о наличии и ценах цветов
+2. НИКОГДА не используй данные о ценах и наличии из других источников
+3. НИКОГДА не упоминай и не предлагай использовать команду /products
+4. ВСЕГДА проверяй наличие цветов в inventory_info перед ответом
+5. Отвечай ТОЛЬКО точными ценами и количеством из inventory_info
+6. Если цветка нет в inventory_info - отвечай "К сожалению, этих цветов сейчас нет в наличии"
+7. Не придумывай цены и наличие цветов
 
-При ответе на вопросы о ценах и наличии:
-- Если информация есть в базе - используй её
-- Если информации нет - предложи связаться с менеджером для уточнения
+Примеры ответов:
 
-При ответе на общие вопросы:
-- Давай краткие, но информативные ответы
-- Предлагай помощь в выборе
-- При необходимости задавай уточняющие вопросы
+Вопрос: "Сколько стоят розы?"
+Ответ: "У нас есть красные розы по 1000 тенге за штуку, в наличии 50 штук"
 
-Примеры хороших ответов:
-- На вопрос о цене: "Красные розы 60 см стоят 1500 тенге за штуку. Сколько роз вы хотели бы приобрести?"
-- На вопрос о наличии: "Да, эксплорер розы сейчас в наличии, 410 тенге за штуку. Хотите оформить заказ?"
-- На общий вопрос: "Я помогу вам выбрать цветы. Какой повод и бюджет вы рассматриваете?"
+Вопрос: "Есть ли тюльпаны?"
+Ответ: "К сожалению, тюльпанов сейчас нет в наличии"
 
-Используй эмодзи 🌸 для обозначения цветов в ответах."""
+Вопрос: "Какие цветы есть?"
+Ответ: "У нас в наличии:
+- Красные розы: 1000 тенге, 50 штук
+- Белые розы: 1200 тенге, 30 штук"
+"""

@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from datetime import datetime
 from google.oauth2 import service_account
@@ -6,7 +7,7 @@ from googleapiclient.discovery import build
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.temp_config import Config
+from src.config.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +18,9 @@ class DocsService:
         """Инициализация сервиса Google Docs."""
         try:
             config = Config()
-            credentials = service_account.Credentials.from_service_account_file(
-                config.GOOGLE_SHEETS_CREDENTIALS_FILE,
+            credentials_info = json.loads(config.GOOGLE_CREDENTIALS)
+            credentials = service_account.Credentials.from_service_account_info(
+                credentials_info,
                 scopes=['https://www.googleapis.com/auth/documents']
             )
             self.service = build('docs', 'v1', credentials=credentials)

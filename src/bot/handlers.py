@@ -9,6 +9,7 @@ from src.services.supabase_service import SupabaseService
 from src.services.openai_service import OpenAIService
 from src.services.docs_service import DocsService
 from src.services.channel_logger import ChannelLogger
+from src.services.sheets_service import SheetsService
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ supabase_service = SupabaseService()
 openai_service = OpenAIService()
 docs_service = DocsService()
 channel_logger = ChannelLogger()
+sheets_service = SheetsService()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
@@ -67,25 +69,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_message = update.message.text
         user_id = update.effective_user.id
         
+        logger.info(f"Processing message from user {user_id}: {user_message}")
+        
         # Получаем контекст разговора
         conversation_context = await supabase_service.get_conversation_context(user_id)
         
-        # Получаем актуальные данные о продуктах
-        products = await supabase_service.get_products()
+        # Получаем актуальные данные о продуктах из Google Sheets
+        try:
+            logger.info("Fetching inventory data from Google Sheets")
+            inventory_data = await sheets_service.get_inventory_data()
+            logger.info(f"Received inventory data: {inventory_data}")
+            
+            inventory_info = sheets_service.format_inventory_for_openai(inventory_data)
+            logger.info(f"Formatted inventory info: {inventory_info}")
+        except Exception as e:
+            logger.error(f"Error getting inventory data: {e}", exc_info=True)
+            inventory_info = "Извините, произошла ошибка при получении данных о товарах."
         
         # Получаем предпочтения пользователя
         user_preferences = await supabase_service.get_user_preferences(user_id)
         
         # Формируем контекст для OpenAI
         context_data = {
-            'products': products,
             'user_preferences': user_preferences,
             'conversation_context': conversation_context,
             'current_time': datetime.datetime.now().isoformat()
         }
         
-        # Получаем ответ от OpenAI
-        response = await openai_service.get_response(user_message, context_data)
+        # Получаем ответ от OpenAI с учетом данных инвентаря
+        logger.info("Getting response from OpenAI")
+        response = await openai_service.get_response(user_message, inventory_info, user_id)
+        logger.info(f"OpenAI response: {response}")
         
         # Отправляем ответ пользователю
         await update.message.reply_text(response)
