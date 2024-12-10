@@ -73,7 +73,7 @@ class SheetsService:
             logger.error(f"Failed to get sheet names: {str(e)}", exc_info=True)
             raise
 
-    async def get_inventory_data(self):
+    def get_inventory_data(self):
         """Get inventory data from Google Sheets."""
         try:
             logger.info(f"Getting inventory data from spreadsheet {self.spreadsheet_id}")
@@ -99,15 +99,11 @@ class SheetsService:
                             'quantity': int(row[1]) if row[1].isdigit() else 0,
                             'price': str(float(row[2])) + " тенге" if row[2].replace('.', '').isdigit() else "0 тенге",
                             'description': row[3] if len(row) > 3 else '',
-                            'category': row[4] if len(row) > 4 else ''
                         }
                         inventory.append(item)
-                        logger.debug(f"Processed row {i}: {item}")
                 except Exception as e:
-                    logger.error(f"Error processing row {i} ({row}): {str(e)}", exc_info=True)
-                    continue
+                    logger.error(f"Error processing row {i}: {e}", exc_info=True)
             
-            logger.info(f"Successfully processed {len(inventory)} inventory items")
             return inventory
             
         except Exception as e:

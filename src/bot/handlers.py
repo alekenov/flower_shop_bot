@@ -3,8 +3,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 import sys
 import os
+import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.services.sheets_service import SheetsService
+from src.services.supabase_service import SupabaseService
 from src.services.openai_service import OpenAIService
 from src.services.docs_service import DocsService
 from src.services.channel_logger import ChannelLogger
@@ -12,7 +13,7 @@ from src.services.channel_logger import ChannelLogger
 logger = logging.getLogger(__name__)
 
 # Инициализация сервисов
-sheets_service = SheetsService()
+supabase_service = SupabaseService()
 openai_service = OpenAIService()
 docs_service = DocsService()
 channel_logger = ChannelLogger()
@@ -29,6 +30,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Чтобы получить помощь, используйте команду /help"
     )
     await update.message.reply_text(welcome_message)
+    
+    # Сохраняем информацию о новом пользователе
+    user = update.effective_user
+    await supabase_service.update_user_preferences(user.id, {
+        'username': user.username,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'language_code': user.language_code
+    })
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
@@ -50,97 +60,70 @@ async def get_channel_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Добавьте этот ID в файл .env как:\n"
             f"TELEGRAM_LOG_CHANNEL_ID={channel_id}"
         )
-    else:
-        await update.message.reply_text(
-            "Чтобы узнать ID канала:\n"
-            "1. Отправьте любое сообщение в ваш канал\n"
-            "2. Перешлите это сообщение мне\n"
-            "Я покажу вам ID канала"
-        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений"""
     try:
-        user_message = update.message.text.lower()
-        logger.info(f"Получено сообщение: {user_message}")
+        user_message = update.message.text
+        user_id = update.effective_user.id
         
-        # Проверяем, спрашивает ли пользователь о цене или наличии конкретных цветов
-        inventory_keywords = ['цена', 'стоит', 'стоят', 'наличие', 'есть', 'остались', 'купить']
+        # Получаем контекст разговора
+        conversation_context = await supabase_service.get_conversation_context(user_id)
         
-        if any(keyword in user_message for keyword in inventory_keywords):
-            logger.info("Обнаружен вопрос о ценах/наличии")
-            try:
-                # Получаем данные из Google Sheets
-                inventory = await sheets_service.get_inventory_data()
-                logger.info(f"Получены данные из таблицы: {inventory}")
-                
-                # Ищем упоминания конкретных цветов в сообщении
-                mentioned_flowers = []
-                for item in inventory:
-                    name_parts = item['name'].lower().split()
-                    category_parts = item['category'].lower().split()
-                    
-                    # Проверяем каждое слово из названия и категории
-                    all_parts = name_parts + category_parts
-                    if any(part in user_message for part in all_parts):
-                        mentioned_flowers.append(item)
-                
-                if mentioned_flowers:
-                    # Если спрашивают про конкретные цветы
-                    response = ""
-                    for flower in mentioned_flowers:
-                        status = "в наличии" if flower['quantity'] > 0 else "нет в наличии"
-                        response += f"🌸 {flower['name']}:\n"
-                        response += f"   • Цена: {flower['price']}\n"
-                        if flower['description']:
-                            response += f"   • {flower['description']}\n"
-                        response += f"   • Статус: {status}\n\n"
-                elif "что" in user_message and "наличии" in user_message:
-                    # Если спрашивают что есть в наличии
-                    available_flowers = [item for item in inventory if item['quantity'] > 0]
-                    if available_flowers:
-                        response = "В нашем магазине сейчас в наличии:\n\n"
-                        for flower in available_flowers:
-                            response += f"🌸 {flower['name']}\n"
-                            response += f"   • Цена: {flower['price']}\n"
-                            if flower['description']:
-                                response += f"   • {flower['description']}\n"
-                            response += "\n"
-                    else:
-                        response = "К сожалению, сейчас все цветы распроданы. Новое поступление ожидается в ближайшее время."
-                else:
-                    # Если цветы не найдены в сообщении
-                    response = await openai_service.get_response(
-                        update.message.text,
-                        user_id=update.effective_user.id
-                    )
-            except Exception as e:
-                logger.error(f"Ошибка при получении данных из таблицы: {e}")
-                response = await openai_service.get_response(
-                    update.message.text,
-                    user_id=update.effective_user.id
-                )
-        else:
-            logger.info("Обычный вопрос, используем OpenAI")
-            response = await openai_service.get_response(
-                update.message.text,
-                user_id=update.effective_user.id
-            )
+        # Получаем актуальные данные о продуктах
+        products = await supabase_service.get_products()
+        
+        # Получаем предпочтения пользователя
+        user_preferences = await supabase_service.get_user_preferences(user_id)
+        
+        # Формируем контекст для OpenAI
+        context_data = {
+            'products': products,
+            'user_preferences': user_preferences,
+            'conversation_context': conversation_context,
+            'current_time': datetime.datetime.now().isoformat()
+        }
+        
+        # Получаем ответ от OpenAI
+        response = await openai_service.get_response(user_message, context_data)
         
         # Отправляем ответ пользователю
         await update.message.reply_text(response)
         
-        # Логируем взаимодействие
-        await channel_logger.log_interaction(
-            user_id=update.effective_user.id,
-            username=update.effective_user.username,
-            message=update.message.text,
-            response=response
-        )
+        # Сохраняем разговор
+        await supabase_service.save_conversation(user_id, user_message, response)
+        
+        # Анализируем сообщение для сбора инсайтов
+        await analyze_message(user_id, user_message, response)
+        
+        # Логируем в канал
+        await channel_logger.log_message(update.message, response)
         
     except Exception as e:
-        error_message = "Извините, произошла ошибка. Попробуйте повторить запрос позже."
-        logger.error(f"Error in handle_message: {e}")
-        await update.message.reply_text(error_message)
+        error_message = f"Произошла ошибка: {str(e)}"
+        logger.error(error_message, exc_info=True)
+        await update.message.reply_text(
+            "Извините, произошла ошибка. Пожалуйста, попробуйте позже или обратитесь к администратору."
+        )
 
-# Удаляем неправильно размещенные обработчики
+async def analyze_message(user_id: int, user_message: str, bot_response: str):
+    """Анализ сообщения для сбора инсайтов"""
+    try:
+        # Анализируем намерения пользователя
+        intent = await openai_service.analyze_intent(user_message)
+        
+        # Сохраняем инсайт
+        await supabase_service.save_user_insight(user_id, 'message_intent', {
+            'message': user_message,
+            'intent': intent
+        })
+        
+        # Сохраняем паттерн взаимодействия
+        await supabase_service.save_interaction_pattern(user_id, 'conversation', {
+            'user_message': user_message,
+            'bot_response': bot_response,
+            'intent': intent
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to analyze message: {str(e)}", exc_info=True)
