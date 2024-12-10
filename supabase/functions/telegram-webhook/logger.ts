@@ -47,6 +47,17 @@ export class Logger {
 
   private async writeLog(entry: LogEntry) {
     try {
+      // Проверяем подключение к базе данных
+      const { data: healthCheck, error: healthError } = await this.supabase
+        .from('bot_logs')
+        .select('id')
+        .limit(1);
+
+      if (healthError) {
+        console.error('Database connection error:', healthError);
+        return;
+      }
+
       // Добавляем контекст к метаданным
       const metadata = {
         ...this.context,
@@ -55,15 +66,32 @@ export class Logger {
         environment: Deno.env.get('ENVIRONMENT') || 'development'
       };
 
-      const { error } = await this.supabase
+      console.log('Attempting to write log to database:', {
+        table: this.tableName,
+        entry: { ...entry, metadata }
+      });
+
+      const { data, error } = await this.supabase
         .from(this.tableName)
-        .insert({
-          ...entry,
-          metadata
-        });
+        .insert([{
+          level: entry.level,
+          category: entry.category,
+          message: entry.message,
+          metadata: metadata,
+          user_id: this.context.user_id,
+          chat_id: this.context.chat_id,
+          created_at: new Date().toISOString()
+        }]);
 
       if (error) {
-        console.error('Error writing to log:', error);
+        console.error('Error writing to log:', {
+          error,
+          errorMessage: error.message,
+          errorDetails: error.details,
+          entry: { ...entry, metadata }
+        });
+      } else {
+        console.log('Successfully wrote log to database:', data);
       }
 
       // Также выводим в консоль для локальной разработки
@@ -82,7 +110,12 @@ export class Logger {
           console.log(logMessage, metadata);
       }
     } catch (error) {
-      console.error('Error in logger:', error);
+      console.error('Error in logger:', {
+        error,
+        errorMessage: error.message,
+        errorStack: error.stack,
+        entry
+      });
     }
   }
 
@@ -125,7 +158,12 @@ export class Logger {
   // Метод для логирования метрик
   async logMetric(name: string, value: number, tags?: Record<string, string>) {
     try {
-      const { error } = await this.supabase
+      console.log('Attempting to write metric to database:', {
+        table: 'bot_metrics',
+        metric: { name, value, tags }
+      });
+
+      const { data, error } = await this.supabase
         .from('bot_metrics')
         .insert({
           name,
@@ -136,6 +174,8 @@ export class Logger {
 
       if (error) {
         console.error('Error logging metric:', error);
+      } else {
+        console.log('Successfully wrote metric to database:', data);
       }
     } catch (error) {
       console.error('Error in metric logger:', error);

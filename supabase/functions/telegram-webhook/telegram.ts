@@ -19,6 +19,11 @@ export class TelegramClient {
   constructor(token: string) {
     this.token = token;
     this.apiUrl = `https://api.telegram.org/bot${token}`;
+    console.log('TelegramClient initialized with API URL:', this.apiUrl);
+  }
+
+  getTokenLength(): number {
+    return this.token.length;
   }
 
   async verifyWebhookRequest(request: Request): Promise<boolean> {
@@ -28,6 +33,7 @@ export class TelegramClient {
   }
 
   async sendMessage(params: SendMessageParams): Promise<Response> {
+    console.log('Sending message with params:', JSON.stringify(params));
     const response = await fetch(`${this.apiUrl}/sendMessage`, {
       method: 'POST',
       headers: {
@@ -36,8 +42,10 @@ export class TelegramClient {
       body: JSON.stringify(params),
     });
 
+    console.log('Telegram API response status:', response.status);
     if (!response.ok) {
       const error = await response.json();
+      console.error('Telegram API error response:', error);
       throw new Error(`Telegram API error: ${JSON.stringify(error)}`);
     }
 

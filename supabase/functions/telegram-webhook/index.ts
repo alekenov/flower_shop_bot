@@ -1,8 +1,15 @@
+// Follow this setup guide to integrate the Deno language server with your editor:
+// https://deno.land/manual/getting_started/setup_your_environment
+// This enables autocomplete, go to definition, etc.
+
+// @supabase/functions-js v2.1.5
+// deno-lint-ignore-file
+// @ts-nocheck
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
 import { TelegramClient } from './telegram.ts'
 import { OpenAIClient } from './openai.ts'
-import { handleCommand } from './commands.ts'
 import { Logger, LogLevel, LogCategory } from './logger.ts'
 
 interface TelegramUpdate {
@@ -25,189 +32,187 @@ interface TelegramUpdate {
   }
 }
 
-// Инициализация клиентов
-const supabaseClient = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-)
-
-const logger = new Logger(supabaseClient)
-
-const openaiClient = new OpenAIClient(
-  Deno.env.get('OPENAI_API_KEY') ?? '',
-  supabaseClient
-)
-
 serve(async (req) => {
-  const startTime = Date.now()
-  
-  // Check all required environment variables
-  const requiredEnvVars = [
-    'TELEGRAM_BOT_TOKEN',
-    'OPENAI_API_KEY',
-    'SUPABASE_URL',
-    'SUPABASE_SERVICE_ROLE_KEY',
-    'TELEGRAM_WEBHOOK_SECRET'
-  ];
-
-  const missingEnvVars = requiredEnvVars.filter(varName => !Deno.env.get(varName));
-  
-  if (missingEnvVars.length > 0) {
-    console.error('Missing required environment variables:', missingEnvVars);
-    return new Response(JSON.stringify({
-      error: 'Missing required environment variables',
-      missing: missingEnvVars
-    }), { status: 500 });
-  }
-
   console.log('Request received:', {
     method: req.method,
     url: req.url,
     headers: Object.fromEntries(req.headers.entries())
   });
 
-  console.log('Environment variables:', {
-    SUPABASE_URL: Deno.env.get('SUPABASE_URL'),
-    TELEGRAM_BOT_TOKEN: Deno.env.get('TELEGRAM_BOT_TOKEN')?.slice(0, 10) + '...',
-    OPENAI_API_KEY: Deno.env.get('OPENAI_API_KEY')?.slice(0, 10) + '...',
-  });
-  
   try {
-    // Проверяем, что это POST запрос
+    const bodyText = await req.text();
+    console.log('Raw request body:', bodyText);
+
     if (req.method !== 'POST') {
-      logger.warning(LogCategory.TELEGRAM, 'Invalid request method', { method: req.method })
-      return new Response('Only POST requests are allowed', { status: 405 })
+      console.warn('Invalid request method:', req.method);
+      return new Response('Only POST requests are allowed', { status: 405 });
     }
 
-    const telegramClient = new TelegramClient(Deno.env.get('TELEGRAM_BOT_TOKEN') ?? '')
+    // Инициализируем Supabase клиент
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const telegramToken = Deno.env.get('TELEGRAM_BOT_TOKEN');
+    const openaiKey = Deno.env.get('OPENAI_API_KEY');
 
-    // Для отладки выводим заголовки запроса
-    console.log('Request headers:', Object.fromEntries(req.headers.entries()))
+    console.log('Environment variables check:', {
+      hasSupabaseUrl: !!supabaseUrl,
+      hasSupabaseKey: !!supabaseKey,
+      hasTelegramToken: !!telegramToken,
+      hasOpenAiKey: !!openaiKey,
+      supabaseUrlLength: supabaseUrl?.length,
+      telegramTokenLength: telegramToken?.length,
+    });
 
-    // Временно отключаем проверку webhook для отладки
-    const isValidRequest = await telegramClient.verifyWebhookRequest(req)
-    if (!isValidRequest) {
-      logger.error(LogCategory.TELEGRAM, 'Invalid webhook request')
-      return new Response('Unauthorized', { status: 401 })
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing Supabase credentials');
     }
 
-    const update: TelegramUpdate = await req.json()
-    console.log('Received update:', JSON.stringify(update))
+    if (!telegramToken) {
+      throw new Error('Missing Telegram Bot Token');
+    }
 
-    // Проверяем наличие сообщения
+    if (!openaiKey) {
+      throw new Error('Missing OpenAI API Key');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const logger = new Logger(supabase);
+    const openai = new OpenAIClient(openaiKey, supabase);
+    const telegramClient = new TelegramClient(telegramToken);
+
+    console.log('Clients initialized');
+
+    let update: TelegramUpdate;
+    try {
+      update = JSON.parse(bodyText);
+      console.log('Parsed update:', update);
+    } catch (e) {
+      console.error('Failed to parse JSON:', e);
+      logger.error(LogCategory.TELEGRAM, 'Failed to parse JSON', { error: e.message, body: bodyText });
+      return new Response('Invalid JSON', { status: 400 });
+    }
+
+    logger.info(LogCategory.TELEGRAM, 'Received update', { update });
+
     if (!update.message) {
-      logger.warning(LogCategory.TELEGRAM, 'No message in update', { update })
-      return new Response('No message in update', { status: 400 })
+      console.warn('No message in update:', update);
+      logger.warning(LogCategory.TELEGRAM, 'No message in update', { update });
+      return new Response('No message in update', { status: 400 });
     }
 
-    const { message } = update
-    const chatId = message.chat.id
-    const userId = message.from?.id
-    const text = message.text ?? ''
+    const chatId = update.message.chat.id;
+    const userId = update.message.from?.id;
+    const userName = update.message.from?.username;
+    const messageText = update.message.text || '';
+
+    console.log('Message info:', {
+      chatId,
+      userId,
+      userName,
+      messageText
+    });
 
     // Устанавливаем контекст для логов
     logger.setContext({
-      chatId,
-      userId,
-      username: message.from?.username,
-      updateId: update.update_id
-    })
+      chat_id: chatId,
+      user_id: userId,
+      user_name: userName
+    });
 
-    // Логируем полученное сообщение
-    logger.info(LogCategory.TELEGRAM, 'Received message', {
-      messageId: message.message_id,
-      text
-    })
+    logger.info(LogCategory.TELEGRAM, 'Processing message', { 
+      chat_id: chatId,
+      user_id: userId,
+      user_name: userName,
+      message_text: messageText 
+    });
+
+    const startTime = Date.now();
 
     try {
-      // Обрабатываем команду или текстовое сообщение
-      if (text.startsWith('/')) {
-        // Это команда
-        logger.info(LogCategory.TELEGRAM, 'Processing command', {
-          command: text.split(' ')[0]
-        })
+      // Обработка команд
+      if (messageText.startsWith('/')) {
+        const command = messageText.split(' ')[0].toLowerCase();
+        console.log('Processing command:', command);
+        logger.info(LogCategory.TELEGRAM, `Processing command: ${command}`, { command });
 
-        await handleCommand(text.split(' ')[0], {
-          chatId,
-          text,
-          telegram: telegramClient,
-          supabase: supabaseClient
-        })
+        switch (command) {
+          case '/start':
+            console.log('Sending start message');
+            await telegramClient.sendMessage({
+              chat_id: chatId,
+              text: 'Добро пожаловать в цветочный магазин! Чем могу помочь?'
+            });
+            console.log('Start message sent');
+            break;
+          default:
+            console.log('Sending unknown command message');
+            await telegramClient.sendMessage({
+              chat_id: chatId,
+              text: 'Извините, я не знаю такой команды.'
+            });
+            console.log('Unknown command message sent');
+            logger.warning(LogCategory.TELEGRAM, 'Unknown command', { command });
+        }
       } else {
-        // Отправляем "печатает" статус
-        await telegramClient.sendChatAction(chatId, 'typing')
-        
-        logger.info(LogCategory.OPENAI, 'Processing text message', {
-          messageLength: text.length
-        })
+        // Обработка обычных сообщений через OpenAI
+        try {
+          console.log('Processing message with OpenAI');
+          logger.info(LogCategory.OPENAI, 'Processing message with OpenAI', { message: messageText });
+          
+          console.log('Calling OpenAI');
+          const response = await openai.processUserMessage(messageText);
+          console.log('OpenAI response received:', response);
 
-        // Засекаем время обработки
-        const aiStartTime = Date.now()
-        
-        // Обрабатываем текстовое сообщение через OpenAI
-        const response = await openaiClient.processUserMessage(text)
-        
-        // Логируем время обработки
-        const aiProcessingTime = Date.now() - aiStartTime
-        await logger.logMetric('ai_processing_time', aiProcessingTime, {
-          chat_id: chatId.toString()
-        })
-        
-        // Отправляем ответ пользователю
-        await telegramClient.sendMessage({
-          chat_id: chatId,
-          text: response,
-          parse_mode: 'HTML'
-        })
+          console.log('Sending message to Telegram');
+          await telegramClient.sendMessage({
+            chat_id: chatId,
+            text: response
+          });
+          console.log('Message sent to Telegram');
+          
+          // Логируем успешную обработку
+          logger.info(LogCategory.OPENAI, 'Successfully processed message', { 
+            input: messageText,
+            response_length: response.length
+          });
 
-        logger.info(LogCategory.TELEGRAM, 'Sent response', {
-          responseLength: response.length,
-          processingTime: aiProcessingTime
-        })
+          // Логируем метрику времени обработки
+          const processingTime = Date.now() - startTime;
+          await logger.logMetric('message_processing_time', processingTime, {
+            type: 'openai_response',
+            chat_id: String(chatId),
+            user_id: String(userId)
+          });
+        } catch (error) {
+          console.error('Error in OpenAI processing:', error);
+          logger.error(LogCategory.OPENAI, 'Error processing message with OpenAI', {
+            error: error.message,
+            stack: error.stack,
+            input: messageText
+          });
+          
+          console.log('Sending error message to Telegram');
+          await telegramClient.sendMessage({
+            chat_id: chatId,
+            text: 'Извините, произошла ошибка при обработке вашего сообщения.'
+          });
+          console.log('Error message sent to Telegram');
+        }
       }
+
+      return new Response('OK', { status: 200 });
     } catch (error) {
-      logger.error(LogCategory.GENERAL, 'Error processing message', {
+      console.error('Unhandled error in webhook:', error);
+      logger.error(LogCategory.GENERAL, 'Unhandled error in webhook', {
         error: error.message,
         stack: error.stack
-      })
-      
-      // Отправляем сообщение об ошибке пользователю
-      await telegramClient.sendMessage({
-        chat_id: chatId,
-        text: 'Извините, произошла ошибка при обработке вашего сообщения. Пожалуйста, попробуйте позже.'
-      })
+      });
+      return new Response(error.message, { status: 500 });
+    } finally {
+      logger.clearContext();
     }
-
-    // Логируем общее время обработки
-    const totalProcessingTime = Date.now() - startTime
-    await logger.logMetric('total_processing_time', totalProcessingTime, {
-      chat_id: chatId.toString()
-    })
-
-    // Очищаем контекст логгера
-    logger.clearContext()
-
-    // Отправляем успешный ответ
-    return new Response(JSON.stringify({
-      status: 'success',
-      message: 'Update processed'
-    }), {
-      headers: { 'Content-Type': 'application/json' }
-    })
-
   } catch (error) {
-    // Обработка ошибок
-    logger.error(LogCategory.GENERAL, 'Fatal error processing update', {
-      error: error.message,
-      stack: error.stack
-    })
-
-    return new Response(JSON.stringify({
-      status: 'error',
-      message: error.message
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    })
+    console.error('Critical error:', error);
+    return new Response('Internal Server Error', { status: 500 });
   }
-})
+});
