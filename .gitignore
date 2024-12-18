@@ -1,0 +1,57 @@
+# Environment variables
+.env
+.env.example
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Logs
+*.log
+*.log.*
+logs/
+
+# Virtual Environment
+venv/
+
+# Sensitive scripts
+scripts/migrate_credentials.py
+scripts/test_credentials.py
+scripts/init_credentials.py
+
+# Credentials
+credentials/
+**/credentials/
+**/*.json
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Google Sheets credentials
+src/config/credentials/
+!import_map.json
+
+node_modules/

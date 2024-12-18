@@ -1,0 +1,21 @@
+name: Sync Google Sheets
+
+on:
+  schedule:
+    # Runs every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Trigger Sync Function
+        run: |
+          curl -i --location --request POST '${{ secrets.SUPABASE_FUNCTION_URL }}/sync-sheets' \
+            --header 'Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}' \
+            --header 'Content-Type: application/json'
+        env:
+          SUPABASE_FUNCTION_URL: ${{ secrets.SUPABASE_FUNCTION_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
