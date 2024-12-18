@@ -54,4 +54,8 @@ credentials/
 src/config/credentials/
 !import_map.json
 
+# Supabase
+supabase/.temp/
+.branches/
+
 node_modules/
