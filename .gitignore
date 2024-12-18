@@ -25,9 +25,9 @@ var/
 .installed.cfg
 *.egg
 
-# Logs
+# Log files
+bot.log*
 *.log
-*.log.*
 logs/
 
 # Virtual Environment
