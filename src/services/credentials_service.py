@@ -1,9 +1,8 @@
 import os
 import logging
 from typing import Optional, Dict, Union, Any
-import psycopg2
-from psycopg2.extras import DictCursor, Json
 import json
+from .database_service import database_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,48 +19,37 @@ class CredentialsService:
     def __init__(self):
         if self._initialized:
             return
-            
-        # Инициализация подключения к базе данных
-        self.conn = psycopg2.connect(
-            dbname="postgres",
-            user="postgres.dkohweivbdwweyvyvcbc",
-            password="vigkif-nesJy2-kivraq",
-            host="aws-0-eu-central-1.pooler.supabase.com",
-            port="6543"
-        )
         self._initialized = True
         self._load_credentials()
 
     def _load_credentials(self) -> None:
         """Загрузка всех учетных данных из базы данных в кэш"""
         try:
-            with self.conn.cursor(cursor_factory=DictCursor) as cur:
-                cur.execute("""
-                    SELECT service_name, credential_key, credential_value 
-                    FROM credentials
-                """)
-                rows = cur.fetchall()
+            rows = database_service.execute_query("""
+                SELECT service_name, credential_key, credential_value 
+                FROM credentials
+            """)
+            
+            # Очищаем текущий кэш
+            self._credentials_cache.clear()
+            
+            # Заполняем кэш новыми данными
+            for row in rows:
+                service = row['service_name']
+                if service not in self._credentials_cache:
+                    self._credentials_cache[service] = {}
                 
-                # Очищаем текущий кэш
-                self._credentials_cache.clear()
-                
-                # Заполняем кэш новыми данными
-                for row in rows:
-                    service = row['service_name']
-                    if service not in self._credentials_cache:
-                        self._credentials_cache[service] = {}
-                    
-                    # Если значение - JSON, преобразуем его в словарь
-                    value = row['credential_value']
-                    if isinstance(value, str) and value.startswith('{'):
-                        try:
-                            value = json.loads(value)
-                        except:
-                            pass
-                            
-                    self._credentials_cache[service][row['credential_key']] = value
-                
-                logger.info(f"Loaded credentials for services: {list(self._credentials_cache.keys())}")
+                # Если значение - JSON, преобразуем его в словарь
+                value = row['credential_value']
+                if isinstance(value, str) and value.startswith('{'):
+                    try:
+                        value = json.loads(value)
+                    except:
+                        pass
+                        
+                self._credentials_cache[service][row['credential_key']] = value
+            
+            logger.info(f"Loaded credentials for services: {list(self._credentials_cache.keys())}")
         except Exception as e:
             logger.error(f"Error loading credentials: {str(e)}")
             raise
@@ -107,54 +95,45 @@ class CredentialsService:
             if isinstance(credential_value, dict):
                 credential_value = json.dumps(credential_value)
                 
-            with self.conn.cursor() as cur:
-                if description:
-                    cur.execute("""
-                        INSERT INTO credentials (service_name, credential_key, credential_value, description)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (service_name, credential_key) 
-                        DO UPDATE SET 
-                            credential_value = EXCLUDED.credential_value,
-                            description = EXCLUDED.description,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (service_name, credential_key, credential_value, description))
-                else:
-                    cur.execute("""
-                        INSERT INTO credentials (service_name, credential_key, credential_value)
-                        VALUES (%s, %s, %s)
-                        ON CONFLICT (service_name, credential_key) 
-                        DO UPDATE SET 
-                            credential_value = EXCLUDED.credential_value,
-                            updated_at = CURRENT_TIMESTAMP
-                    """, (service_name, credential_key, credential_value))
+            if description:
+                database_service.execute_query("""
+                    INSERT INTO credentials (service_name, credential_key, credential_value, description)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (service_name, credential_key) 
+                    DO UPDATE SET 
+                        credential_value = EXCLUDED.credential_value,
+                        description = EXCLUDED.description,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (service_name, credential_key, credential_value, description), fetch=False)
+            else:
+                database_service.execute_query("""
+                    INSERT INTO credentials (service_name, credential_key, credential_value)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (service_name, credential_key) 
+                    DO UPDATE SET 
+                        credential_value = EXCLUDED.credential_value,
+                        updated_at = CURRENT_TIMESTAMP
+                """, (service_name, credential_key, credential_value), fetch=False)
+            
+            # Обновляем кэш
+            if service_name not in self._credentials_cache:
+                self._credentials_cache[service_name] = {}
                 
-                self.conn.commit()
-                
-                # Обновляем кэш
-                if service_name not in self._credentials_cache:
-                    self._credentials_cache[service_name] = {}
+            # Если значение было JSON строкой, преобразуем обратно в словарь
+            value = credential_value
+            if isinstance(value, str) and value.startswith('{'):
+                try:
+                    value = json.loads(value)
+                except:
+                    pass
                     
-                # Если значение было JSON строкой, преобразуем обратно в словарь
-                value = credential_value
-                if isinstance(value, str) and value.startswith('{'):
-                    try:
-                        value = json.loads(value)
-                    except:
-                        pass
-                        
-                self._credentials_cache[service_name][credential_key] = value
-                
-                logger.info(f"Updated credential: {service_name}.{credential_key}")
-                return True
+            self._credentials_cache[service_name][credential_key] = value
+            
+            logger.info(f"Updated credential: {service_name}.{credential_key}")
+            return True
         except Exception as e:
             logger.error(f"Error updating credential {service_name}.{credential_key}: {str(e)}")
-            self.conn.rollback()
             return False
-
-    def __del__(self):
-        """Закрытие соединения с базой данных при уничтожении объекта"""
-        if hasattr(self, 'conn'):
-            self.conn.close()
 
 # Создаем глобальный экземпляр сервиса
 credentials_service = CredentialsService()
