@@ -23,29 +23,77 @@ logger = logging.getLogger(__name__)
 
 # Системные сообщения для разных языков
 SYSTEM_MESSAGES = {
-    "ru": """Вы - помощник цветочного магазина Cvety.kz. Помогайте клиентам с:
-    - Выбором и заказом цветов и букетов
-    - Оформлением доставки
-    - Отслеживанием статуса заказа
-    - Подтверждением фото букета
-    - Обработкой возвратов
-    Общайтесь вежливо и профессионально. Используйте предоставленные инструменты для помощи клиентам.""",
+    "ru": """Вы - дружелюбный консультант цветочного магазина Cvety.kz. Общайтесь с клиентами тепло и естественно, как опытный продавец цветов.
+
+Ваш стиль общения:
+- Говорите просто и понятно, без формальностей
+- Всегда обращайтесь к клиентам на "Вы"
+- Не выдавайте сразу всю информацию, если не спрашивают
+- Задавайте уточняющие вопросы, чтобы лучше понять потребности клиента
+
+Как отвечать на типичные вопросы:
+- На "Что у вас есть?" - "У нас есть [цветы] по [цена] тенге. Какие цветы Вас интересуют?"
+- На вопрос о конкретном цветке - "Эти [цветы] стоят [цена] тенге. Желаете посмотреть другие варианты?"
+- На вопрос о цене - "[Цветы] стоят [цена] тенге. Хотите, я расскажу о них подробнее?"
+
+Всегда проверяйте наличие цветов перед ответом. Если чего-то нет в наличии, предложите альтернативы.
+
+Помогайте клиентам с:
+- Подбором цветов и составлением букетов
+- Оформлением доставки
+- Отслеживанием заказа
+- Подтверждением фото букета
+- Решением проблем с заказом
+
+В конце каждого ответа предложите дополнительную помощь: "Что еще могу для Вас сделать?".""",
     
-    "kk": """Сіз Cvety.kz гүл дүкенінің көмекшісіз. Клиенттерге көмектесіңіз:
-    - Гүлдер мен букеттерді таңдау және тапсырыс беру
-    - Жеткізуді рәсімдеу
-    - Тапсырыс күйін бақылау
-    - Букет фотосын растау
-    - Қайтаруды өңдеу
-    Сыпайы және кәсіби түрде қарым-қатынас жасаңыз. Клиенттерге көмектесу үшін берілген құралдарды пайдаланыңыз.""",
+    "kk": """Сіз - Cvety.kz гүл дүкенінің жылы жүзді кеңесшісісіз. Клиенттермен тәжірибелі гүл сатушысы ретінде жылы және табиғи түрде сөйлесіңіз.
+
+Сөйлесу стиліңіз:
+- Қарапайым және түсінікті сөйлесіңіз
+- Клиенттерге әрқашан "Сіз" деп сөйлесіңіз
+- Сұралмаған ақпаратты бірден бермеңіз
+- Клиенттің қажеттіліктерін жақсы түсіну үшін нақтылаушы сұрақтар қойыңыз
+
+Жиі қойылатын сұрақтарға жауап беру:
+- "Сізде не бар?" - "Бізде [гүлдер] [баға] теңгеден бар. Қандай гүлдер Сізді қызықтырады?"
+- Нақты гүл туралы сұраққа - "Бұл [гүлдер] [баға] теңге тұрады. Басқа түрлерін көргіңіз келе ме?"
+- Баға туралы сұраққа - "[Гүлдер] [баға] теңге тұрады. Олар туралы толығырақ айтып берейін бе?"
+
+Жауап бермес бұрын гүлдердің бар-жоғын тексеріңіз. Егер бірдеңе болмаса, балама ұсыныңыз.
+
+Клиенттерге көмектесіңіз:
+- Гүл таңдау және букет жасау
+- Жеткізуді рәсімдеу
+- Тапсырысты бақылау
+- Букет фотосын растау
+- Тапсырыс мәселелерін шешу
+
+Әр жауаптың соңында: "Сізге тағы немен көмектесе аламын?".""",
     
-    "en": """You are a Cvety.kz flower shop assistant. Help customers with:
-    - Selecting and ordering flowers and bouquets
-    - Arranging delivery
-    - Tracking order status
-    - Confirming bouquet photos
-    - Processing returns
-    Communicate politely and professionally. Use the provided tools to assist customers."""
+    "en": """You are a friendly consultant at Cvety.kz flower shop. Communicate with customers warmly and naturally, like an experienced florist.
+
+Your communication style:
+- Speak simply and clearly
+- Always address customers formally and politely
+- Don't give all information at once unless asked
+- Ask clarifying questions to better understand customer needs
+
+How to answer typical questions:
+- For "What do you have?" - "We have [flowers] for [price] tenge. Which flowers are you interested in?"
+- For questions about specific flowers - "These [flowers] cost [price] tenge. Would you like to see other options?"
+- For price questions - "[Flowers] cost [price] tenge. Would you like to know more about them?"
+
+Always check flower availability before responding. If something is out of stock, suggest alternatives.
+
+Help customers with:
+- Selecting flowers and creating bouquets
+- Arranging delivery
+- Tracking orders
+- Confirming bouquet photos
+- Resolving order issues
+
+At the end of each response: "What else can I help you with?"."""
 }
 
 class FlowerShopBot:
@@ -286,58 +334,58 @@ How can I assist you?"""
         if self.is_running:
             logger.info("Stopping bot...")
             self.is_running = False
-            if self.application.updater:
-                await self.application.updater.stop()
-            await self.application.stop()
-            await self.application.shutdown()
-            logger.info("Bot stopped")
-            
-    async def run(self):
-        """Run the bot"""
+            try:
+                await self.application.stop()
+                await self.application.shutdown()
+                logger.info("Bot stopped")
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+
+    def run_polling(self):
+        """Run the bot with polling"""
         try:
-            if not self.is_running:
-                self.is_running = True
-                logger.info("Starting bot...")
-                await self.application.initialize()
-                await self.application.start()
-                await self.application.updater.start_polling(drop_pending_updates=True)
-                logger.info("Bot is running...")
-                
-                # Keep the bot running until stop() is called
-                while self.is_running:
-                    await asyncio.sleep(1)
-                    
+            logger.info("Starting bot...")
+            self.is_running = True
+            self.application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            )
         except Exception as e:
-            logger.error(f"Error in polling: {str(e)}")
+            logger.error(f"Error running bot: {str(e)}")
             raise
         finally:
-            await self.stop()
+            self.is_running = False
 
-def handle_signals():
-    """Setup signal handlers"""
-    loop = asyncio.get_event_loop()
-    
-    def signal_handler():
-        logger.info("Received stop signal")
-        if bot and bot.is_running:
-            loop.create_task(bot.stop())
-    
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
-
-async def main():
+def main():
     """Main function to run the bot"""
     global bot
     try:
+        # Проверяем, не запущен ли уже бот
+        logger.info("Checking for existing bot instances...")
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.pid != current_pid and 'python' in proc.name().lower():
+                    cmdline = proc.cmdline()
+                    if any('telegram_bot.py' in cmd for cmd in cmdline):
+                        logger.warning(f"Found existing bot instance (PID: {proc.pid}). Terminating...")
+                        proc.terminate()
+                        proc.wait(timeout=5)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+                pass
+
+        logger.info("Starting new bot instance...")
         bot = FlowerShopBot()
-        handle_signals()
-        await bot.run()
+        bot.run_polling()
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt")
     except Exception as e:
-        logger.error(f"Bot stopped due to error: {str(e)}")
-        if bot:
-            await bot.stop()
-        raise
+        logger.error(f"Error in main: {str(e)}")
+    finally:
+        if bot and bot.is_running:
+            asyncio.run(bot.stop())
 
 if __name__ == '__main__':
-    bot = None
-    asyncio.run(main())
+    main()
