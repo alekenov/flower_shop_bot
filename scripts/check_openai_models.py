@@ -1,11 +1,11 @@
 import os
 import openai
-from src.services.credentials_service import credentials_service
+from src.utils.credentials_manager import credentials_manager
 
 async def main():
     try:
         # Получаем API ключ из Supabase
-        api_key = await credentials_service.get_credential('openai', 'api_key')
+        api_key = credentials_manager.get_credential('openai', 'api_key')
         openai.api_key = api_key
         
         print(f"\nUsing API key: {api_key[:8]}...")  

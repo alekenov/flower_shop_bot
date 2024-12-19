@@ -6,7 +6,7 @@ import logging
 # Добавляем путь к src в PYTHONPATH
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from services.credentials_service import credentials_service
+from src.utils.credentials_manager import credentials_manager
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +21,7 @@ def set_webhook(webhook_url: str):
     """
     try:
         # Получаем токен бота из credentials service
-        bot_token = credentials_service.get_credential('telegram', 'bot_token_prod')
+        bot_token = credentials_manager.get_credential('telegram', 'bot_token_prod')
         if not bot_token:
             raise ValueError("Bot token not found in credentials")
             
