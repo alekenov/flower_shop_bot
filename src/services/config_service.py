@@ -1,6 +1,9 @@
 import logging
 from typing import Optional
-from .credentials_service import credentials_service
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+from utils.credentials_manager import credentials_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +30,11 @@ class ConfigService:
         try:
             # Проверяем специальные ключи
             if key == 'TELEGRAM_BOT_TOKEN_DEV':
-                return credentials_service.get_credential('telegram', 'bot_token_dev')
+                return credentials_manager.get_credential('telegram', 'bot_token_dev')
             elif key == 'TELEGRAM_BOT_TOKEN_PROD':
-                return credentials_service.get_credential('telegram', 'bot_token_prod')
+                return credentials_manager.get_credential('telegram', 'bot_token_prod')
             elif key == 'OPENAI_API_KEY':
-                return credentials_service.get_credential('openai', 'api_key')
+                return credentials_manager.get_credential('openai', 'api_key')
                 
             # Для остальных ключей пытаемся разобрать на сервис и ключ
             parts = key.lower().split('_', 1)
@@ -41,8 +44,8 @@ class ConfigService:
                 
             service_name, credential_key = parts
             
-            # Получаем значение из credentials_service
-            value = credentials_service.get_credential(service_name, credential_key)
+            # Получаем значение из credentials_manager
+            value = credentials_manager.get_credential(service_name, credential_key)
             if value is None:
                 logger.error(f"Config value not found for key: {key}")
             return value
