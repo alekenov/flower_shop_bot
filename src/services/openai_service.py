@@ -15,7 +15,7 @@ from src.services.cache_service import CacheService
 from src.services.emotion_analyzer import EmotionAnalyzer
 from src.services.knowledge_base_service import KnowledgeBaseService
 from src.services.dialogue_manager import DialogueManager
-from .credentials_service import credentials_service
+from src.utils.credentials_manager import credentials_manager
 from src.prompts.system_prompts import get_prompt
 from src.services.monitoring_service import MonitoringService, TokenUsage, ResponseQuality
 
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class OpenAIService:
     def __init__(self):
         # Получаем учетные данные из базы
-        api_key = credentials_service.get_credential('openai', 'api_key')
-        self.model = credentials_service.get_credential('openai', 'model')
+        api_key = credentials_manager.get_credential('openai', 'api_key')
+        self.model = credentials_manager.get_credential('openai', 'model')
         
         self.client = AsyncOpenAI(
             api_key=api_key

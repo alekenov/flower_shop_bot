@@ -1,13 +1,9 @@
 import os
 import logging
+import psycopg2
 from psycopg2.extras import DictCursor, Json
 from typing import List, Dict, Optional, Any
 from datetime import datetime
-from dotenv import load_dotenv
-from .database_service import database_service
-
-# Загружаем переменные окружения
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +13,57 @@ class SupabaseService:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(SupabaseService, cls).__new__(cls)
+            cls._instance._init_connection()
         return cls._instance
+
+    def _init_connection(self):
+        """Initialize database connection"""
+        try:
+            self.conn = psycopg2.connect(
+                host="aws-0-eu-central-1.pooler.supabase.com",
+                database="postgres",
+                user="postgres.dkohweivbdwweyvyvcbc",
+                password=os.environ.get('SUPABASE_DB_PASSWORD'),
+                port="6543"
+            )
+            self.conn.autocommit = True
+            logger.info("Successfully connected to database")
+        except Exception as e:
+            logger.error(f"Failed to connect to database: {str(e)}")
+            raise
+
+    def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
+        """Execute a query and return all results."""
+        try:
+            with self.conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute(query, params)
+                results = cur.fetchall()
+                return [dict(row) for row in results]
+        except Exception as e:
+            logger.error(f"Failed to execute query: {str(e)}")
+            return []
+
+    def execute_query_single(self, query: str, params: tuple = None) -> Optional[Dict[str, Any]]:
+        """Execute a query and return a single result."""
+        try:
+            with self.conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute(query, params)
+                result = cur.fetchone()
+                return dict(result) if result else None
+        except Exception as e:
+            logger.error(f"Failed to execute query: {str(e)}")
+            return None
 
     def get_products(self, category: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get products from database, optionally filtered by category."""
         try:
             if category:
-                return database_service.execute_query(
+                return self.execute_query(
                     "SELECT * FROM products WHERE category = %s", 
                     (category,)
                 )
             else:
-                return database_service.execute_query("SELECT * FROM products")
+                return self.execute_query("SELECT * FROM products")
         except Exception as e:
             logger.error(f"Failed to get products: {str(e)}")
             return []
@@ -36,7 +71,7 @@ class SupabaseService:
     def get_product_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """Get a product by its name."""
         try:
-            return database_service.execute_query_single(
+            return self.execute_query_single(
                 "SELECT * FROM products WHERE name ILIKE %s", 
                 (f"%{name}%",)
             )
@@ -47,13 +82,12 @@ class SupabaseService:
     def save_conversation(self, user_id: int, message: str, response: str) -> None:
         """Save conversation history."""
         try:
-            database_service.execute_query(
+            self.execute_query(
                 """
                 INSERT INTO conversations (user_id, message, response, created_at)
                 VALUES (%s, %s, %s, %s)
-                """, 
-                (user_id, message, response, datetime.utcnow()),
-                fetch=False
+                """,
+                (user_id, message, response, datetime.now())
             )
         except Exception as e:
             logger.error(f"Failed to save conversation: {str(e)}")
@@ -61,7 +95,7 @@ class SupabaseService:
     def get_user_preferences(self, user_id: int) -> Optional[Dict[str, Any]]:
         """Get user preferences."""
         try:
-            return database_service.execute_query_single(
+            return self.execute_query_single(
                 "SELECT * FROM user_preferences WHERE user_id = %s", 
                 (user_id,)
             )
@@ -78,7 +112,7 @@ class SupabaseService:
                 set_clause = ", ".join([f"{k} = %s" for k in preferences.keys()])
                 values = list(preferences.values())
                 values.append(user_id)
-                database_service.execute_query(
+                self.execute_query(
                     f"UPDATE user_preferences SET {set_clause} WHERE user_id = %s",
                     tuple(values),
                     fetch=False
@@ -88,7 +122,7 @@ class SupabaseService:
                 columns = ["user_id"] + list(preferences.keys())
                 placeholders = ["%s"] * (len(preferences) + 1)
                 values = [user_id] + list(preferences.values())
-                database_service.execute_query(
+                self.execute_query(
                     f"""
                     INSERT INTO user_preferences ({', '.join(columns)})
                     VALUES ({', '.join(placeholders)})
@@ -102,12 +136,12 @@ class SupabaseService:
     def save_user_insight(self, user_id: int, insight_type: str, data: Dict[str, Any]) -> None:
         """Save user insight."""
         try:
-            database_service.execute_query(
+            self.execute_query(
                 """
                 INSERT INTO user_insights (user_id, type, data, created_at)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (user_id, insight_type, Json(data), datetime.utcnow()),
+                (user_id, insight_type, Json(data), datetime.now()),
                 fetch=False
             )
         except Exception as e:
@@ -116,7 +150,7 @@ class SupabaseService:
     def get_conversation_context(self, user_id: int, limit: int = 5) -> List[Dict[str, Any]]:
         """Get recent conversation context for a user."""
         try:
-            return database_service.execute_query(
+            return self.execute_query(
                 """
                 SELECT message, response, created_at
                 FROM conversations
@@ -133,12 +167,12 @@ class SupabaseService:
     def save_interaction_pattern(self, user_id: int, pattern_type: str, data: Dict[str, Any]) -> None:
         """Save interaction pattern."""
         try:
-            database_service.execute_query(
+            self.execute_query(
                 """
                 INSERT INTO interaction_patterns (user_id, type, data, created_at)
                 VALUES (%s, %s, %s, %s)
                 """,
-                (user_id, pattern_type, Json(data), datetime.utcnow()),
+                (user_id, pattern_type, Json(data), datetime.now()),
                 fetch=False
             )
         except Exception as e:
@@ -148,7 +182,7 @@ class SupabaseService:
         """Update product quantity. Positive value to add, negative to subtract."""
         try:
             # First get current quantity
-            result = database_service.execute_query_single(
+            result = self.execute_query_single(
                 "SELECT quantity FROM products WHERE name = %s",
                 (product_name,)
             )
@@ -165,7 +199,7 @@ class SupabaseService:
                 return False
             
             # Update quantity
-            database_service.execute_query(
+            self.execute_query(
                 """
                 UPDATE products 
                 SET quantity = %s 
@@ -190,7 +224,7 @@ class SupabaseService:
             Словарь с данными сервисного аккаунта или None, если не найден
         """
         try:
-            return database_service.execute_query_single(
+            return self.execute_query_single(
                 """
                 SELECT credential_value
                 FROM credentials
@@ -215,7 +249,7 @@ class SupabaseService:
             True если сохранение успешно, False в противном случае
         """
         try:
-            database_service.execute_query(
+            self.execute_query(
                 """
                 INSERT INTO credentials (service_name, credential_key, credential_value, description)
                 VALUES ('google', %s, %s, 'Google service account credentials')
@@ -231,6 +265,14 @@ class SupabaseService:
         except Exception as e:
             logger.error(f"Failed to save service account {account_name}: {str(e)}")
             return False
+
+    def __del__(self):
+        """Close database connection on cleanup"""
+        try:
+            if hasattr(self, 'conn'):
+                self.conn.close()
+        except:
+            pass
 
 # Create a global instance
 supabase_service = SupabaseService()
