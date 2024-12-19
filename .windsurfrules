@@ -4,6 +4,26 @@
 4. Проверять все предположения перед внесением изменений
 5. Вести лог ошибок и их решений
 6. При работе не создавай лишние файлы бестолку, лучше проверь есть ли такой файл и лучше его улучшать. 
-7. Запомни в терминала загружать через python3 
+7. Использовать python3 для запуска скриптов 
 8. Спрашивай часто вопросы, чтобы быть в контексте проекта 
 9. Не создавай .env файл, храни в в таблице Supabase Credentials
+10. Не пиши код в каскаде, только словами обьесняй. 
+
+
+ Хранение учетных данных:
+   - НЕ использовать .env файлы
+   - ВСЕ учетные данные хранить в таблице Supabase credentials
+   - Структура таблицы credentials:
+     * service_name (например, 'openai', 'telegram', 'google')
+     * credential_key (например, 'api_key', 'bot_token')
+     * credential_value (значение ключа/токена)
+     * description (описание для чего используется)
+
+
+Supabase Direct Connection:
+- URL: postgresql://postgres.dkohweivbdwweyvyvcbc:vigkif-nesJy2-kivraq@aws-0-eu-central-1.pooler.supabase.com:6543/postgres
+- Host: aws-0-eu-central-1.pooler.supabase.com
+- Port: 6543
+- User: postgres.dkohweivbdwweyvyvcbc
+- Password: vigkif-nesJy2-kivraq
+- Database: postgres
