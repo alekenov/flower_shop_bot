@@ -10,6 +10,7 @@ Telegram бот для цветочного магазина с интеграц
 1. Быстрые ответы на базовые вопросы через Telegram
 2. Сбор и анализ вопросов клиентов для улучшения сервиса
 3. Интеграция с базами данных для актуальной информации
+4. Автоматизация работы с Instagram Direct
 
 ## Основной функционал
 
@@ -21,6 +22,7 @@ Telegram бот для цветочного магазина с интеграц
   - Способы оплаты
 - Поиск и предоставление информации о товарах
 - Обработка специальных запросов
+- Интеграция с Instagram Direct
 
 ### Интеграции
 - **Google Sheets**
@@ -32,92 +34,124 @@ Telegram бот для цветочного магазина с интеграц
   - Обработка сложных запросов
   - Поддержка контекста разговора
 - **Supabase**
-  - Хранение данных пользователей
+  - Хранение данных пользователей и учетных данных
   - Логирование взаимодействий
   - Кэширование ответов
+- **Instagram**
+  - Обработка сообщений из Instagram Direct
+  - Автоматические ответы на типовые вопросы
+  - Интеграция с общей системой обработки заказов
 
 ## Структура проекта
 
 ```
 flower_shop_bot/
 ├── src/                      # Основной код проекта
-│   ├── bot/                  # Модули Telegram бота
-│   │   ├── handlers.py      # Обработчики сообщений
-│   │   └── bot.py          # Основной класс бота
+│   ├── telegram_bot.py       # Основной файл бота
 │   ├── services/            # Сервисные модули
-│   │   ├── google_service.py   # Работа с Google Sheets
+│   │   ├── sheets_service.py   # Работа с Google Sheets
 │   │   ├── supabase_service.py # Работа с базой данных
-│   │   ├── credentials_service.py # Управление учетными данными
 │   │   ├── config_service.py   # Управление конфигурацией
-│   │   └── inventory_service.py # Управление инвентарем
-│   └── utils/               # Вспомогательные модули
-│       └── logger.py        # Система логирования
-├── db/                      # База данных
-│   └── migrations/          # Миграции базы данных
-├── .env                     # Переменные окружения
-└── requirements.txt         # Зависимости проекта
+│   │   └── instagram_service.py # Работа с Instagram API
+│   ├── instagram/           # Модули для работы с Instagram
+│   │   ├── api.py          # Instagram Graph API клиент
+│   │   └── messages.py     # Обработка сообщений
+│   └── utils/              # Вспомогательные модули
+│       └── logger.py       # Система логирования
+├── supabase/               # Конфигурация Supabase
+│   └── migrations/         # Миграции базы данных
+├── docs/                   # Документация
+│   ├── openai.md          # Документация по OpenAI
+│   ├── instagram.md       # Документация по Instagram
+│   └── roadmap.md         # План развития
+└── requirements.txt        # Зависимости проекта
 ```
 
 ## Установка и настройка
 
-1. Клонируйте репозиторий
-2. Создайте и настройте `.env` файл:
+### 1. Подготовка окружения
+
+1. Клонируйте репозиторий:
+   ```bash
+   git clone [repository-url]
+   cd flower_shop_bot
    ```
-   # Telegram
-   TELEGRAM_BOT_TOKEN_DEV=your_token
-   
-   # OpenAI
-   OPENAI_API_KEY=your_key
-   
-   # Supabase
-   SUPABASE_DB_NAME=your_db_name
-   SUPABASE_DB_USER=your_db_user
-   SUPABASE_DB_PASSWORD=your_db_password
-   SUPABASE_DB_HOST=your_db_host
-   SUPABASE_DB_PORT=your_db_port
-   
-   # Google
-   GOOGLE_SPREADSHEET_ID=your_id
-   ```
-3. Установите зависимости:
+
+2. Установите зависимости:
    ```bash
    pip install -r requirements.txt
    ```
-4. Запустите бота:
-   ```bash
-   python3 src/telegram_bot.py
+
+### 2. Настройка учетных данных
+
+Все учетные данные хранятся в таблице `credentials` в базе данных Supabase. Необходимо настроить следующие сервисы:
+
+1. **Telegram Bot**
+   ```sql
+   INSERT INTO credentials (service_name, credential_key, credential_value, description)
+   VALUES 
+   ('telegram', 'bot_token_dev', 'your_token', 'Development bot token'),
+   ('telegram', 'bot_token_prod', 'your_token', 'Production bot token');
    ```
 
-## Последние изменения
+2. **OpenAI API**
+   ```sql
+   INSERT INTO credentials (service_name, credential_key, credential_value, description)
+   VALUES 
+   ('openai', 'api_key', 'your_key', 'OpenAI API Key'),
+   ('openai', 'model', 'gpt-4-1106-preview', 'OpenAI Model Name');
+   ```
 
-### Добавлено
-- Обработка превышения лимита запросов к OpenAI API
-- Система отслеживания истории разговоров
-- Расширенное логирование в Telegram канал
-- Новая система управления учетными данными через базу данных
+3. **Google Sheets**
+   ```sql
+   INSERT INTO credentials (service_name, credential_key, credential_value, description)
+   VALUES 
+   ('google', 'spreadsheet_id', 'your_id', 'Google Spreadsheet ID');
+   ```
 
-### Улучшено
-- Оптимизирована работа с контекстом разговора
-- Улучшена система обработки ошибок
-- Обновлена структура логирования
-- Повышена безопасность хранения учетных данных
+4. **Instagram**
+   ```sql
+   INSERT INTO credentials (service_name, credential_key, credential_value, description)
+   VALUES 
+   ('instagram', 'access_token', 'your_token', 'Instagram Graph API Token'),
+   ('instagram', 'user_id', 'your_id', 'Instagram Business Account ID');
+   ```
 
-## Развитие проекта
+### 3. Запуск бота
 
-Текущие планы по развитию:
-1. Оптимизация промптов для более точных ответов
-2. Расширение интеграции с Google Sheets
-3. Улучшение системы логирования и мониторинга
-4. Добавление новых функций для работы с заказами
+```bash
+cd src
+python3 telegram_bot.py
+```
 
-## Документация
+## Мониторинг и обслуживание
 
-Дополнительная документация:
-- [workflow.md](workflow.md) - Описание работы бота
-- [TODO.md](TODO.md) - Список задач и планы развития
+### Логирование
+- Все логи сохраняются в базу данных в таблицу `bot_logs`
+- Критические ошибки отправляются в Telegram канал мониторинга
+- Статистика использования доступна в таблице `usage_stats`
 
-## Безопасность
+### Обновление учетных данных
+1. Проверка текущих учетных данных:
+   ```sql
+   SELECT service_name, credential_key, updated_at 
+   FROM credentials 
+   ORDER BY service_name;
+   ```
 
-- Все чувствительные данные хранятся в `.env` файле
-- Настроены правила `.gitignore`
-- Регулярное обновление зависимостей
+2. Обновление учетных данных:
+   ```sql
+   UPDATE credentials 
+   SET credential_value = 'new_value', 
+       updated_at = CURRENT_TIMESTAMP
+   WHERE service_name = 'service' 
+   AND credential_key = 'key';
+   ```
+
+## План развития
+
+Текущий план развития проекта доступен в [docs/roadmap.md](docs/roadmap.md).
+
+## Лицензия
+
+MIT License. См. файл LICENSE для деталей.

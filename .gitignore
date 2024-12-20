@@ -59,6 +59,3 @@ supabase/.temp/
 .branches/
 
 node_modules/
-
-# Windsurf rules
-.windsurfrules

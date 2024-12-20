@@ -17,14 +17,21 @@ class DocsService:
     def __init__(self):
         """Инициализация сервиса Google Docs."""
         try:
-            config = Config()
-            credentials_info = json.loads(config.GOOGLE_CREDENTIALS)
+            from services.config_service import config_service
+            
+            # Получаем учетные данные из Supabase с правильным именем сервиса
+            credentials_info = json.loads(config_service.get_config('google_service_account'))
             credentials = service_account.Credentials.from_service_account_info(
                 credentials_info,
-                scopes=['https://www.googleapis.com/auth/documents']
+                scopes=[
+                    'https://www.googleapis.com/auth/documents',
+                    'https://www.googleapis.com/auth/drive.file'
+                ]
             )
             self.service = build('docs', 'v1', credentials=credentials)
-            self.knowledge_base_doc_id = config.GOOGLE_DOCS_KNOWLEDGE_BASE_ID
+            
+            # Пытаемся получить существующий ID документа
+            self.knowledge_base_doc_id = config_service.get_config('google_docs_knowledge_base_id')
             logger.info("Successfully initialized Google Docs service")
         except Exception as e:
             logger.error(f"Failed to initialize Google Docs service: {e}")
@@ -434,4 +441,49 @@ class DocsService:
             
         except Exception as e:
             logger.error(f"Failed to update metadata: {e}")
+            raise
+
+    async def create_knowledge_base_doc(self) -> str:
+        """Создание нового документа базы знаний и сохранение его ID."""
+        try:
+            # Создаем новый документ
+            doc = self.service.documents().create(body={
+                'title': 'База знаний Cvety.kz'
+            }).execute()
+            
+            # Получаем ID нового документа
+            doc_id = doc.get('documentId')
+            
+            # Настраиваем права доступа
+            drive_service = build('drive', 'v3', credentials=self.service._http.credentials)
+            
+            # Открываем доступ для всех на чтение
+            drive_service.permissions().create(
+                fileId=doc_id,
+                body={'type': 'anyone', 'role': 'reader'},
+                fields='id'
+            ).execute()
+            
+            # Открываем доступ на редактирование для alekenov@gmail.com
+            drive_service.permissions().create(
+                fileId=doc_id,
+                body={'type': 'user', 'role': 'writer', 'emailAddress': 'alekenov@gmail.com'},
+                fields='id'
+            ).execute()
+            
+            # Сохраняем ID в базу данных
+            from services.config_service import config_service
+            config_service.set_config('google_docs_knowledge_base_id', doc_id, 'ID документа базы знаний')
+            
+            # Обновляем ID в текущем экземпляре
+            self.knowledge_base_doc_id = doc_id
+            
+            # Создаем начальную структуру
+            await self.create_initial_structure()
+            
+            logger.info(f"Successfully created new knowledge base document with ID: {doc_id}")
+            return doc_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create knowledge base document: {e}")
             raise
