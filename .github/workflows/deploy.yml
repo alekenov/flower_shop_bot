@@ -14,8 +14,8 @@ jobs:
       SUPABASE_URL: https://dkohweivbdwweyvyvcbc.supabase.co
       SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
       SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      SUPABASE_STORAGE_ACCESS_ID: ${{ secrets.SUPABASE_STORAGE_ACCESS_ID }}
-      SUPABASE_STORAGE_SECRET: ${{ secrets.SUPABASE_STORAGE_SECRET }}
+      CONTAINER_REGISTRY_USERNAME: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}
+      CONTAINER_REGISTRY_PASSWORD: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
       DOCKER_IMAGE: flower-shop-bot
       
     steps:
@@ -24,19 +24,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
       
-      - name: Login to Supabase Storage
-        run: |
-          echo "${{ secrets.SUPABASE_STORAGE_SECRET }}" | docker login \
-            --username "${{ secrets.SUPABASE_STORAGE_ACCESS_ID }}" \
-            --password-stdin \
-            ${{ env.SUPABASE_URL }}
+      - name: Login to Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: dkohweivbdwweyvyvcbc.supabase.co
+          username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}
+          password: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
       
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ env.SUPABASE_URL }}/${{ env.DOCKER_IMAGE }}:latest
+          tags: dkohweivbdwweyvyvcbc.supabase.co/${{ env.DOCKER_IMAGE }}:latest
           build-args: |
             SUPABASE_URL=${{ env.SUPABASE_URL }}
             SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
@@ -44,28 +44,30 @@ jobs:
       
       - name: Deploy to Supabase
         run: |
-          curl -X POST "${{ env.SUPABASE_URL }}/rest/v1/rpc/deploy_container" \
+          curl -X POST "${{ env.SUPABASE_URL }}/rest/v1/functions/deploy_container" \
           -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE }}" \
           -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE }}" \
           -H "Content-Type: application/json" \
           -d '{
             "name": "flower-shop-bot",
-            "image": "${{ env.SUPABASE_URL }}/${{ env.DOCKER_IMAGE }}:latest",
-            "env": {
-              "SUPABASE_URL": "${{ env.SUPABASE_URL }}",
-              "SUPABASE_SERVICE_ROLE": "${{ secrets.SUPABASE_SERVICE_ROLE }}",
-              "SUPABASE_ANON_KEY": "${{ secrets.SUPABASE_ANON_KEY }}",
-              "SUPABASE_DB_HOST": "aws-0-eu-central-1.pooler.supabase.com",
-              "SUPABASE_DB_PORT": "6543",
-              "SUPABASE_DB_NAME": "postgres",
-              "SUPABASE_DB_USER": "postgres.dkohweivbdwweyvyvcbc",
-              "SUPABASE_DB_PASSWORD": "${{ secrets.SUPABASE_DB_PASSWORD }}"
+            "container": {
+              "image": "dkohweivbdwweyvyvcbc.supabase.co/${{ env.DOCKER_IMAGE }}:latest",
+              "env": {
+                "SUPABASE_URL": "${{ env.SUPABASE_URL }}",
+                "SUPABASE_SERVICE_ROLE": "${{ secrets.SUPABASE_SERVICE_ROLE }}",
+                "SUPABASE_ANON_KEY": "${{ secrets.SUPABASE_ANON_KEY }}",
+                "SUPABASE_DB_HOST": "aws-0-eu-central-1.pooler.supabase.com",
+                "SUPABASE_DB_PORT": "6543",
+                "SUPABASE_DB_NAME": "postgres",
+                "SUPABASE_DB_USER": "postgres.dkohweivbdwweyvyvcbc",
+                "SUPABASE_DB_PASSWORD": "${{ secrets.SUPABASE_DB_PASSWORD }}"
+              },
+              "healthcheck": {
+                "test": ["CMD", "curl", "-f", "http://localhost:8080/health"],
+                "interval": "30s",
+                "timeout": "10s",
+                "retries": 3
+              }
             },
-            "healthcheck": {
-              "test": ["CMD", "curl", "-f", "http://localhost:8080/health"],
-              "interval": "30s",
-              "timeout": "10s",
-              "retries": 3
-            },
-            "restart": "always"
+            "restart_policy": "always"
           }'
