@@ -7,6 +7,8 @@ import time
 from typing import Dict, List, Optional
 from datetime import datetime
 import signal
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 from openai import AsyncOpenAI
 from telegram import Update
@@ -69,10 +71,30 @@ IMPORTANT RULES:
 6. Provide only facts from the knowledge base"""
 }
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+            self.wfile.write(response.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_server():
+    server = HTTPServer(('', 8000), HealthCheckHandler)
+    server.serve_forever()
+
 class FlowerShopBot:
     def __init__(self):
         """Initialize bot with application instance"""
         self.is_running = False
+        
+        # Start health check server
+        self.health_thread = threading.Thread(target=run_health_server, daemon=True)
+        self.health_thread.start()
         
         # Initialize services
         self.openai_api_key = config_service.get_config('OPENAI_API_KEY')

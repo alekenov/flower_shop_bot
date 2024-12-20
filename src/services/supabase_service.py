@@ -4,17 +4,27 @@ import psycopg2
 from psycopg2.extras import DictCursor, Json
 from typing import List, Dict, Optional, Any, Union
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 logger = logging.getLogger(__name__)
 
-# Конфигурация подключения к Supabase
+# Конфигурация подключения к Supabase из переменных окружения
 SUPABASE_CONFIG = {
-    'host': 'aws-0-eu-central-1.pooler.supabase.com',
-    'port': '6543',
-    'user': 'postgres.dkohweivbdwweyvyvcbc',
-    'password': 'vigkif-nesJy2-kivraq',
-    'database': 'postgres'
+    'host': os.getenv('SUPABASE_HOST'),
+    'port': os.getenv('SUPABASE_PORT'),
+    'user': os.getenv('SUPABASE_USER'),
+    'password': os.getenv('SUPABASE_PASSWORD'),
+    'database': os.getenv('SUPABASE_DATABASE')
 }
+
+# Проверяем наличие всех необходимых переменных
+required_vars = ['host', 'port', 'user', 'password', 'database']
+missing_vars = [var for var in required_vars if not SUPABASE_CONFIG[var]]
+if missing_vars:
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 class SupabaseService:
     """
