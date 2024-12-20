@@ -24,7 +24,7 @@ jobs:
       - name: Login to Supabase Container Registry
         uses: docker/login-action@v2
         with:
-          registry: api.supabase.com
+          registry: dkohweivbdwweyvyvcbc.supabase.co
           username: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           password: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       
@@ -33,7 +33,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: api.supabase.com/dkohweivbdwweyvyvcbc/${{ env.DOCKER_IMAGE }}:latest
+          tags: dkohweivbdwweyvyvcbc.supabase.co/${{ env.DOCKER_IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
       
@@ -45,7 +45,7 @@ jobs:
           -d '{
             "name": "flower-shop-bot",
             "type": "container",
-            "image": "api.supabase.com/dkohweivbdwweyvyvcbc/flower-shop-bot:latest",
+            "image": "dkohweivbdwweyvyvcbc.supabase.co/flower-shop-bot:latest",
             "env": {
               "SUPABASE_DB_HOST": "aws-0-eu-central-1.pooler.supabase.com",
               "SUPABASE_DB_PORT": "6543",
