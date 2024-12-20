@@ -15,4 +15,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Command to run the application
-CMD ["python", "src/main.py"]
+CMD ["python", "src/telegram_bot.py"]

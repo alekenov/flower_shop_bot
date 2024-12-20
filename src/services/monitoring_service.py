@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 
 from src.services.supabase_service import supabase_service
-from src.config.config import Config
+from src.services.config_service import config_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class ResponseQuality:
 
 class MonitoringService:
     def __init__(self):
-        self.config = Config()
+        self.config = config_service
         
     async def log_token_usage(self, usage: TokenUsage) -> None:
         """Логирует использование токенов."""

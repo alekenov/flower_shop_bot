@@ -59,3 +59,4 @@ supabase/.temp/
 .branches/
 
 node_modules/
+temp_view_doc.py

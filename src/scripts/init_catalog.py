@@ -4,7 +4,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from src.services.sheets_service import SheetsService
-from src.config.config import Config
+from src.services.config_service import config_service
 
 async def init_catalog():
     """Initialize the catalog sheet and add some test data."""

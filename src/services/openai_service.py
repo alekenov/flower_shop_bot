@@ -9,7 +9,7 @@ from collections import defaultdict
 import re
 from typing import List, Dict
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.config.config import Config
+from src.services.config_service import config_service
 from src.services.docs_service import DocsService
 from src.services.cache_service import CacheService
 from src.services.emotion_analyzer import EmotionAnalyzer
