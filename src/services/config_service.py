@@ -6,6 +6,15 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Конфигурация подключения к Supabase
+SUPABASE_CONFIG = {
+    'host': 'aws-0-eu-central-1.pooler.supabase.com',
+    'port': '6543',
+    'user': 'postgres.dkohweivbdwweyvyvcbc',
+    'password': 'vigkif-nesJy2-kivraq',
+    'database': 'postgres'
+}
+
 class ConfigService:
     """
     Сервис для работы с конфигурацией и учетными данными в Supabase.
@@ -26,12 +35,14 @@ class ConfigService:
     def _init_connection(self) -> None:
         """Инициализация подключения к базе данных"""
         try:
-            # Подключаемся к базе данных используя URL из переменной окружения
-            db_url = os.environ.get('SUPABASE_DIRECT_URL')
-            if not db_url:
-                raise ValueError("SUPABASE_DIRECT_URL environment variable is not set")
-                
-            self.conn = psycopg2.connect(db_url)
+            # Подключаемся к базе данных используя прямые параметры
+            self.conn = psycopg2.connect(
+                host=SUPABASE_CONFIG['host'],
+                port=SUPABASE_CONFIG['port'],
+                user=SUPABASE_CONFIG['user'],
+                password=SUPABASE_CONFIG['password'],
+                database=SUPABASE_CONFIG['database']
+            )
             self.conn.autocommit = True
             logger.info("Successfully connected to database")
         except Exception as e:

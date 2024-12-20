@@ -15,6 +15,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from function_handlers import TOOL_DEFINITIONS, execute_function
 from services.config_service import config_service
 from services.cache_service import CacheService
+from services.docs_service import DocsService
 
 # Setup logging
 logging.basicConfig(
@@ -25,77 +26,47 @@ logger = logging.getLogger(__name__)
 
 # Системные сообщения для разных языков
 SYSTEM_MESSAGES = {
-    "ru": """Вы - дружелюбный консультант цветочного магазина Cvety.kz. Общайтесь с клиентами тепло и естественно, как опытный продавец цветов.
+    "ru": """Ты - помощник цветочного магазина Cvety.kz. Твоя главная задача - давать точные и краткие ответы на основе предоставленной информации из базы знаний.
 
-Ваш стиль общения:
-- Говорите просто и понятно, без формальностей
-- Всегда обращайтесь к клиентам на "Вы"
-- Не выдавайте сразу всю информацию, если не спрашивают
-- Задавайте уточняющие вопросы, чтобы лучше понять потребности клиента
+ВАЖНЫЕ ПРАВИЛА:
+1. Используй ТОЛЬКО информацию из базы знаний
+2. Отвечай МАКСИМАЛЬНО КРАТКО, без лишних слов
+3. Если точной информации нет в базе знаний - ответь "Извините, у меня нет точной информации об этом"
+4. НИКОГДА не придумывай информацию
+5. Не используй вежливые обороты и дополнительные фразы
+6. Давай только факты из базы знаний
 
-Как отвечать на типичные вопросы:
-- На "Что у вас есть?" - "У нас есть [цветы] по [цена] тенге. Какие цветы Вас интересуют?"
-- На вопрос о конкретном цветке - "Эти [цветы] стоят [цена] тенге. Желаете посмотреть другие варианты?"
-- На вопрос о цене - "[Цветы] стоят [цена] тенге. Хотите, я расскажу о них подробнее?"
+Примеры правильных ответов:
+- На вопрос "Какой адрес?": "Достык 5"
+- На вопрос "Время работы?": "9:00-20:00"
+- На вопрос "Способы оплаты?": "Наличные, банковские карты, Kaspi"
 
-Всегда проверяйте наличие цветов перед ответом. Если чего-то нет в наличии, предложите альтернативы.
+Примеры неправильных ответов:
+❌ "Мы находимся по адресу Достык 5. Будем рады видеть вас!"
+❌ "Наш магазин работает ежедневно с 9 утра до 8 вечера"
+❌ "У нас есть несколько удобных способов оплаты..."
 
-Помогайте клиентам с:
-- Подбором цветов и составлением букетов
-- Оформлением доставки
-- Отслеживанием заказа
-- Подтверждением фото букета
-- Решением проблем с заказом
+Помни: чем короче и точнее ответ, тем лучше.""",
 
-В конце каждого ответа предложите дополнительную помощь: "Что еще могу для Вас сделать?".""",
-    
-    "kk": """Сіз - Cvety.kz гүл дүкенінің жылы жүзді кеңесшісіз. Клиенттермен тәжірибелі гүл сатушысы ретінде жылы және табиғи түрде сөйлесіңіз.
+    "kk": """Сіз Cvety.kz гүл дүкенінің көмекшісіз. Сіздің басты міндетіңіз - білім базасындағы ақпарат негізінде нақты және қысқа жауаптар беру.
 
-Сөйлесу стиліңіз:
-- Қарапайым және түсінікті сөйлесіңіз
-- Клиенттерге әрқашан "Сіз" деп сөйлесіңіз
-- Сұралмаған ақпаратты бірден бермеңіз
-- Клиенттің қажеттіліктерін жақсы түсіну үшін нақтылаушы сұрақтар қойыңыз
+МАҢЫЗДЫ ЕРЕЖЕЛЕР:
+1. ТЕК білім базасындағы ақпаратты пайдаланыңыз
+2. Артық сөздерсіз МАКСИМАЛДЫ ҚЫСҚА жауап беріңіз
+3. Егер нақты ақпарат болмаса - "Кешіріңіз, бұл туралы нақты ақпаратым жоқ" деп жауап беріңіз
+4. ЕШҚАШАН ақпаратты ойдан шығармаңыз
+5. Сыпайы сөздер мен қосымша сөйлемдерді қолданбаңыз
+6. Тек білім базасындағы фактілерді беріңіз""",
 
-Жиі қойылатын сұрақтарға жауап беру:
-- "Сізде не бар?" - "Бізде [гүлдер] [баға] теңгеден бар. Қандай гүлдер Сізді қызықтырады?"
-- Нақты гүл туралы сұраққа - "Бұл [гүлдер] [баға] теңге тұрады. Басқа түрлерін көргіңіз келе ме?"
-- Баға туралы сұраққа - "[Гүлдер] [баға] теңге тұрады. Олар туралы толығырақ айтып берейін бе?"
+    "en": """You are the assistant of Cvety.kz flower shop. Your main task is to provide accurate and concise answers based on the provided knowledge base information.
 
-Гүлдердің бар-жоғын тексеріңіз. Егер бірдеңе болмаса, балама ұсыныңыз.
-
-Клиенттерге көмектесіңіз:
-- Гүл таңдау және букет жасау
-- Жеткізуді рәсімдеу
-- Тапсырысты бақылау
-- Букет фотосын растау
-- Тапсырыс мәселелерін шешу
-
-Әр жауаптың соңында: "Сізге тағы немен көмектесе аламын?".""",
-    
-    "en": """You are a friendly consultant at Cvety.kz flower shop. Communicate with customers warmly and naturally, like an experienced florist.
-
-Your communication style:
-- Speak simply and clearly
-- Always address customers formally and politely
-- Don't give all information at once unless asked
-- Ask clarifying questions to better understand customer needs
-
-How to answer typical questions:
-- For "What do you have?" - "We have [flowers] for [price] tenge. Which flowers are you interested in?"
-- For questions about specific flowers - "These [flowers] cost [price] tenge. Would you like to see other options?"
-- For price questions - "[Flowers] cost [price] tenge. Would you like to know more about them?"
-
-Always check flower availability before responding. If something is out of stock, suggest alternatives.
-
-Help customers with:
-- Selecting flowers and creating bouquets
-- Arranging delivery
-- Tracking orders
-- Confirming bouquet photos
-- Resolving order issues
-
-At the end of each response: "What else can I help you with?"."""
+IMPORTANT RULES:
+1. Use ONLY information from the knowledge base
+2. Answer VERY BRIEFLY, without extra words
+3. If exact information is not available - reply "Sorry, I don't have exact information about this"
+4. NEVER make up information
+5. Don't use polite phrases and additional sentences
+6. Provide only facts from the knowledge base"""
 }
 
 class FlowerShopBot:
@@ -110,6 +81,7 @@ class FlowerShopBot:
         self.client = AsyncOpenAI(api_key=self.openai_api_key)
         
         self.cache_service = CacheService()
+        self.docs_service = DocsService()
 
         # Get bot token
         self.bot_token = config_service.get_config('TELEGRAM_BOT_TOKEN_DEV')
@@ -198,49 +170,76 @@ How can I assist you?"""
             
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработка входящих сообщений"""
+        text = update.message.text
+        user_id = update.effective_user.id
+        
         try:
             start_time = time.time()
             
-            # Получаем текст сообщения
-            text = update.message.text
-            user_id = update.effective_user.id
             logger.info(f"Received message from user {user_id}: {text}")
             
             # Отправляем индикатор набора текста
             await update.message.chat.send_chat_action(action="typing")
             
-            # Проверяем кэш
-            cached_response = await self.cache_service.get_cached_response(text)
-            was_cached = bool(cached_response)
+            # Определяем язык сообщения
+            lang = await self.detect_language(text)
             
-            if cached_response:
-                logger.info("Using cached response")
-                response = cached_response['answer']
+            # Получаем или создаем контекст диалога
+            context_data = await self.cache_service.get_or_create_context(user_id)
+            
+            # Получаем релевантные части базы знаний
+            relevant_knowledge = await self.docs_service.get_relevant_knowledge(text)
+            logger.info(f"Found relevant knowledge: {relevant_knowledge}")
+            
+            # История сообщений пользователя
+            if 'messages' not in context_data:
+                context_data['messages'] = []
+            
+            # Формируем системное сообщение
+            system_message = SYSTEM_MESSAGES[lang]
+            if "информация не найдена" not in relevant_knowledge.lower():
+                system_message += f"""
+
+ДОСТУПНАЯ ИНФОРМАЦИЯ ИЗ БАЗЫ ЗНАНИЙ:
+{relevant_knowledge}
+
+ПОМНИ: 
+1. Используй ТОЛЬКО эту информацию для ответа
+2. Отвечай МАКСИМАЛЬНО КРАТКО
+3. Только факты, без лишних слов"""
+            
+            # Обновляем или добавляем системное сообщение
+            if context_data['messages'] and context_data['messages'][0]["role"] == "system":
+                context_data['messages'][0]["content"] = system_message
             else:
-                # Определяем язык сообщения
-                lang = await self.detect_language(text)
-                
-                # Получаем или создаем контекст диалога
-                context_data = await self.cache_service.get_or_create_context(user_id)
-                
-                # История сообщений пользователя
-                if 'messages' not in context_data:
-                    context_data['messages'] = [{"role": "system", "content": SYSTEM_MESSAGES[lang]}]
-                
-                # Добавляем сообщение пользователя
-                context_data['messages'].append({"role": "user", "content": text})
-                
-                # Получаем ответ от OpenAI
-                response = await self.get_openai_response(context_data['messages'])
-                
-                # Добавляем ответ в контекст
-                context_data['messages'].append({"role": "assistant", "content": response})
-                
-                # Обновляем контекст в базе
-                await self.cache_service.update_context(user_id, context_data)
-                
-                # Кэшируем ответ
-                await self.cache_service.cache_response(text, response)
+                context_data['messages'].insert(0, {
+                    "role": "system",
+                    "content": system_message
+                })
+            
+            # Добавляем сообщение пользователя
+            context_data['messages'].append({
+                "role": "user", 
+                "content": f"Вопрос: {text}"
+            })
+            
+            # Получаем ответ от OpenAI
+            response = await self.get_openai_response(context_data['messages'])
+            
+            # Если информация не найдена в базе знаний, добавляем вопрос в список необработанных
+            if "информация не найдена" in relevant_knowledge.lower():
+                await self.docs_service.add_unanswered_question(
+                    question=text,
+                    user_id=user_id,
+                    bot_response=response,
+                    response_type="Нет информации в базе знаний"
+                )
+            
+            # Добавляем ответ в контекст
+            context_data['messages'].append({"role": "assistant", "content": response})
+            
+            # Обновляем контекст в базе
+            await self.cache_service.update_context(user_id, context_data)
             
             # Отправляем ответ пользователю
             await update.message.reply_text(response)
@@ -253,7 +252,7 @@ How can I assist you?"""
                 question=text,
                 answer=response,
                 response_time=response_time,
-                was_cached=was_cached
+                was_cached=False
             )
             
         except Exception as e:

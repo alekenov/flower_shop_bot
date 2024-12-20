@@ -2,8 +2,10 @@ import logging
 import re
 import time
 import hashlib
+import json
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
+from psycopg2.extras import Json
 
 from services.supabase_service import SupabaseService
 
@@ -134,7 +136,7 @@ class CacheService:
 
     async def get_or_create_context(self, user_id: int) -> Dict[str, Any]:
         """Получает или создает контекст диалога"""
-        context = self.db.execute_query_single(
+        result = self.db.execute_query_single(
             """
             SELECT context FROM chat_context
             WHERE user_id = %s
@@ -142,17 +144,19 @@ class CacheService:
             (user_id,)
         )
 
-        if not context:
-            context = {'messages': []}
-            self.db.execute_query(
-                """
-                INSERT INTO chat_context (user_id, context)
-                VALUES (%s, %s)
-                """,
-                (user_id, context),
-                fetch=False
-            )
+        if result:
+            return result['context']
 
+        # Если контекст не найден, создаем новый
+        context = {'messages': []}
+        self.db.execute_query(
+            """
+            INSERT INTO chat_context (user_id, context)
+            VALUES (%s, %s)
+            """,
+            (user_id, Json(context)),
+            fetch=False
+        )
         return context
 
     async def update_context(self, user_id: int, context: Dict[str, Any]) -> None:
@@ -163,7 +167,7 @@ class CacheService:
             SET context = %s, last_updated = NOW()
             WHERE user_id = %s
             """,
-            (context, user_id),
+            (Json(context), user_id),
             fetch=False
         )
 
