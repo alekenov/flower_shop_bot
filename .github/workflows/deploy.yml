@@ -31,11 +31,11 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-          SUPABASE_DB_HOST: aws-0-eu-central-1.pooler.supabase.com
-          SUPABASE_DB_PORT: 6543
-          SUPABASE_DB_NAME: postgres
-          SUPABASE_DB_USER: postgres.dkohweivbdwweyvyvcbc
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          host: aws-0-eu-central-1.pooler.supabase.com
+          port: 6543
+          database: postgres
+          user: postgres.dkohweivbdwweyvyvcbc
+          password: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           # Start the bot
           python src/telegram_bot.py
