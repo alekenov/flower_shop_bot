@@ -1,70 +1,61 @@
 # Flower Shop Telegram Bot 
 
-Telegram бот для цветочного магазина с интеграцией Google Sheets для управления инвентарем и использованием OpenAI для генерации ответов.
+Telegram бот для цветочного магазина с интеграцией Google Docs для базы знаний, использованием OpenAI для генерации ответов и Supabase для хранения данных.
 
 ## Обзор проекта
 
 Бот автоматизирует обработку частых вопросов клиентов цветочного магазина, отвечая на типичные вопросы о доставке, ценах и наличии цветов, а также собирает данные для улучшения сервиса.
 
 ### Цели проекта
-1. Быстрые ответы на базовые вопросы через Telegram
+1. Быстрые и естественные ответы на вопросы через Telegram
 2. Сбор и анализ вопросов клиентов для улучшения сервиса
 3. Интеграция с базами данных для актуальной информации
-4. Автоматизация работы с Instagram Direct
+4. Автоматическая обработка часто задаваемых вопросов
 
 ## Основной функционал
 
 ### Работа с клиентами
-- Ответы на частые вопросы:
-  - Цены на букеты
-  - График работы
-  - Условия доставки
-  - Способы оплаты
-- Поиск и предоставление информации о товарах
-- Обработка специальных запросов
-- Интеграция с Instagram Direct
+- Естественное общение с клиентами:
+  - Понимание контекста диалога
+  - Персонализированные ответы
+  - Мультиязычная поддержка (RU, KK, EN)
+- Интеллектуальный поиск по базе знаний
+- Автоматическое определение языка
+- Кэширование частых вопросов
 
 ### Интеграции
-- **Google Sheets**
-  - Синхронизация каталога товаров
-  - Управление инвентарем
-  - Обновление цен и наличия
+- **Google Docs**
+  - База знаний с ответами на вопросы
+  - Совместное редактирование контента
+  - Автоматическое обновление информации
 - **OpenAI**
   - Генерация естественных ответов
   - Обработка сложных запросов
   - Поддержка контекста разговора
 - **Supabase**
-  - Хранение данных пользователей и учетных данных
-  - Логирование взаимодействий
+  - Хранение учетных данных
   - Кэширование ответов
-- **Instagram**
-  - Обработка сообщений из Instagram Direct
-  - Автоматические ответы на типовые вопросы
-  - Интеграция с общей системой обработки заказов
+  - Статистика использования
+  - Логирование взаимодействий
 
 ## Структура проекта
 
 ```
 flower_shop_bot/
-├── src/                      # Основной код проекта
-│   ├── telegram_bot.py       # Основной файл бота
-│   ├── services/            # Сервисные модули
-│   │   ├── sheets_service.py   # Работа с Google Sheets
+├── src/                    # Основной код проекта
+│   ├── telegram_bot.py     # Основной файл бота
+│   ├── services/          # Сервисные модули
+│   │   ├── docs_service.py  # Работа с Google Docs
+│   │   ├── cache_service.py # Кэширование и статистика
 │   │   ├── supabase_service.py # Работа с базой данных
-│   │   ├── config_service.py   # Управление конфигурацией
-│   │   └── instagram_service.py # Работа с Instagram API
-│   ├── instagram/           # Модули для работы с Instagram
-│   │   ├── api.py          # Instagram Graph API клиент
-│   │   └── messages.py     # Обработка сообщений
-│   └── utils/              # Вспомогательные модули
-│       └── logger.py       # Система логирования
-├── supabase/               # Конфигурация Supabase
-│   └── migrations/         # Миграции базы данных
-├── docs/                   # Документация
-│   ├── openai.md          # Документация по OpenAI
-│   ├── instagram.md       # Документация по Instagram
-│   └── roadmap.md         # План развития
-└── requirements.txt        # Зависимости проекта
+│   │   └── config_service.py   # Управление конфигурацией
+│   └── scripts/           # Скрипты для обслуживания
+│       └── init_knowledge_base.py # Инициализация базы знаний
+├── supabase/             # Конфигурация Supabase
+│   └── migrations/       # Миграции базы данных
+└── docs/                 # Документация
+    ├── credentials.md    # Управление учетными данными
+    └── roadmap.md        # План развития
 ```
 
 ## Установка и настройка
@@ -82,71 +73,65 @@ flower_shop_bot/
    pip install -r requirements.txt
    ```
 
-### 2. Настройка учетных данных
+### 2. Настройка базы данных
 
-Все учетные данные хранятся в таблице `credentials` в базе данных Supabase. Необходимо настроить следующие сервисы:
-
-1. **Telegram Bot**
-   ```sql
-   INSERT INTO credentials (service_name, credential_key, credential_value, description)
-   VALUES 
-   ('telegram', 'bot_token_dev', 'your_token', 'Development bot token'),
-   ('telegram', 'bot_token_prod', 'your_token', 'Production bot token');
+1. Примените миграции:
+   ```bash
+   psql $SUPABASE_URL -f supabase/migrations/20241220_create_chat_tables.sql
    ```
 
-2. **OpenAI API**
-   ```sql
-   INSERT INTO credentials (service_name, credential_key, credential_value, description)
-   VALUES 
-   ('openai', 'api_key', 'your_key', 'OpenAI API Key'),
-   ('openai', 'model', 'gpt-4-1106-preview', 'OpenAI Model Name');
+2. Настройте учетные данные в таблице `credentials`:
+   - OpenAI API
+   - Telegram Bot Token
+   - Google Service Account
+
+### 3. Инициализация базы знаний
+
+1. Создайте документ базы знаний:
+   ```bash
+   python3 src/scripts/init_knowledge_base.py
    ```
 
-3. **Google Sheets**
+2. Заполните базу знаний через Google Docs:
+   - Информация о магазине
+   - Часто задаваемые вопросы
+   - Условия доставки
+   - Способы оплаты
+
+## Мониторинг и статистика
+
+### Таблицы для анализа
+- `cache_answers` - кэшированные ответы
+- `chat_statistics` - статистика диалогов
+- `chat_context` - контекст диалогов
+
+### Основные метрики
+1. Эффективность кэша:
    ```sql
-   INSERT INTO credentials (service_name, credential_key, credential_value, description)
-   VALUES 
-   ('google', 'spreadsheet_id', 'your_id', 'Google Spreadsheet ID');
+   SELECT 
+     COUNT(*) as total_queries,
+     SUM(CASE WHEN was_cached THEN 1 ELSE 0 END) as cached_hits,
+     AVG(response_time_ms) as avg_response_time
+   FROM chat_statistics;
    ```
 
-4. **Instagram**
+2. Популярные вопросы:
    ```sql
-   INSERT INTO credentials (service_name, credential_key, credential_value, description)
-   VALUES 
-   ('instagram', 'access_token', 'your_token', 'Instagram Graph API Token'),
-   ('instagram', 'user_id', 'your_id', 'Instagram Business Account ID');
+   SELECT question, hits 
+   FROM cache_answers 
+   ORDER BY hits DESC 
+   LIMIT 5;
    ```
 
-### 3. Запуск бота
+## Обслуживание
 
-```bash
-cd src
-python3 telegram_bot.py
-```
+### Очистка данных
+- Контекст диалогов очищается автоматически через 1 час
+- Неиспользуемые кэшированные ответы удаляются через 7 дней
 
-## Мониторинг и обслуживание
-
-### Логирование
-- Все логи сохраняются в базу данных в таблицу `bot_logs`
-- Критические ошибки отправляются в Telegram канал мониторинга
-- Статистика использования доступна в таблице `usage_stats`
-
-### Обновление учетных данных
-1. Проверка текущих учетных данных:
-   ```sql
-   SELECT service_name, credential_key, updated_at 
-   FROM credentials 
-   ORDER BY service_name;
-   ```
-
-2. Обновление учетных данных:
-   ```sql
-   UPDATE credentials 
-   SET credential_value = 'new_value', 
-       updated_at = CURRENT_TIMESTAMP
-   WHERE service_name = 'service' 
-   AND credential_key = 'key';
-   ```
+### Обновление базы знаний
+1. Отредактируйте документ в Google Docs
+2. Изменения применяются автоматически
 
 ## План развития
 

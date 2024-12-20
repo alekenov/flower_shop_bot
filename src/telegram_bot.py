@@ -3,6 +3,7 @@ import json
 import logging
 import asyncio
 import re
+import time
 from typing import Dict, List, Optional
 from datetime import datetime
 import signal
@@ -13,6 +14,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 from function_handlers import TOOL_DEFINITIONS, execute_function
 from services.config_service import config_service
+from services.cache_service import CacheService
 
 # Setup logging
 logging.basicConfig(
@@ -47,7 +49,7 @@ SYSTEM_MESSAGES = {
 
 В конце каждого ответа предложите дополнительную помощь: "Что еще могу для Вас сделать?".""",
     
-    "kk": """Сіз - Cvety.kz гүл дүкенінің жылы жүзді кеңесшісісіз. Клиенттермен тәжірибелі гүл сатушысы ретінде жылы және табиғи түрде сөйлесіңіз.
+    "kk": """Сіз - Cvety.kz гүл дүкенінің жылы жүзді кеңесшісіз. Клиенттермен тәжірибелі гүл сатушысы ретінде жылы және табиғи түрде сөйлесіңіз.
 
 Сөйлесу стиліңіз:
 - Қарапайым және түсінікті сөйлесіңіз
@@ -60,7 +62,7 @@ SYSTEM_MESSAGES = {
 - Нақты гүл туралы сұраққа - "Бұл [гүлдер] [баға] теңге тұрады. Басқа түрлерін көргіңіз келе ме?"
 - Баға туралы сұраққа - "[Гүлдер] [баға] теңге тұрады. Олар туралы толығырақ айтып берейін бе?"
 
-Жауап бермес бұрын гүлдердің бар-жоғын тексеріңіз. Егер бірдеңе болмаса, балама ұсыныңыз.
+Гүлдердің бар-жоғын тексеріңіз. Егер бірдеңе болмаса, балама ұсыныңыз.
 
 Клиенттерге көмектесіңіз:
 - Гүл таңдау және букет жасау
@@ -101,11 +103,13 @@ class FlowerShopBot:
         """Initialize bot with application instance"""
         self.is_running = False
         
-        # Initialize OpenAI client
+        # Initialize services
         self.openai_api_key = config_service.get_config('OPENAI_API_KEY')
         if not self.openai_api_key:
             raise ValueError("OpenAI API key not found in database")
         self.client = AsyncOpenAI(api_key=self.openai_api_key)
+        
+        self.cache_service = CacheService()
 
         # Get bot token
         self.bot_token = config_service.get_config('TELEGRAM_BOT_TOKEN_DEV')
@@ -195,62 +199,73 @@ How can I assist you?"""
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработка входящих сообщений"""
         try:
+            start_time = time.time()
+            
             # Получаем текст сообщения
             text = update.message.text
-            logger.info(f"Received message: {text}")
+            user_id = update.effective_user.id
+            logger.info(f"Received message from user {user_id}: {text}")
             
             # Отправляем индикатор набора текста
             await update.message.chat.send_chat_action(action="typing")
-            logger.info("Sent typing action")
-
-            # Определяем язык сообщения
-            lang = await self.detect_language(text)
-            logger.info(f"Detected language: {lang}")
-
-            # История сообщений пользователя
-            if 'messages' not in context.user_data:
-                logger.info("Initializing message history")
-                context.user_data['messages'] = []
-                context.user_data['current_lang'] = lang
             
-            # Добавляем системное сообщение, если это первое сообщение или язык изменился
-            if (not context.user_data['messages'] or 
-                context.user_data['current_lang'] != lang):
-                logger.info(f"Setting system message for language: {lang}")
-                context.user_data['messages'] = [{"role": "system", "content": SYSTEM_MESSAGES[lang]}]
-                context.user_data['current_lang'] = lang
-
-            # Добавляем сообщение пользователя
-            context.user_data['messages'].append({"role": "user", "content": text})
-            logger.info("Added user message to history")
+            # Проверяем кэш
+            cached_response = await self.cache_service.get_cached_response(text)
+            was_cached = bool(cached_response)
             
-            try:
+            if cached_response:
+                logger.info("Using cached response")
+                response = cached_response['answer']
+            else:
+                # Определяем язык сообщения
+                lang = await self.detect_language(text)
+                
+                # Получаем или создаем контекст диалога
+                context_data = await self.cache_service.get_or_create_context(user_id)
+                
+                # История сообщений пользователя
+                if 'messages' not in context_data:
+                    context_data['messages'] = [{"role": "system", "content": SYSTEM_MESSAGES[lang]}]
+                
+                # Добавляем сообщение пользователя
+                context_data['messages'].append({"role": "user", "content": text})
+                
                 # Получаем ответ от OpenAI
-                logger.info("Requesting OpenAI response")
-                response = await self.get_openai_response(context.user_data['messages'])
-                logger.info(f"OpenAI response received: {response}")
+                response = await self.get_openai_response(context_data['messages'])
                 
-                # Добавляем ответ ассистента в историю
-                context.user_data['messages'].append({"role": "assistant", "content": response})
-                logger.info("Added assistant response to history")
+                # Добавляем ответ в контекст
+                context_data['messages'].append({"role": "assistant", "content": response})
                 
-                # Отправляем ответ пользователю
-                await update.message.reply_text(response)
-                logger.info("Sent response to user")
+                # Обновляем контекст в базе
+                await self.cache_service.update_context(user_id, context_data)
                 
-            except Exception as e:
-                logger.error(f"Error in OpenAI communication: {str(e)}", exc_info=True)
-                error_messages = {
-                    "ru": "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз или переформулируйте ваш вопрос.",
-                    "kk": "Кешіріңіз, сұрауыңызды өңдеу кезінде қате пайда болды. Қайталап көріңіз немесе сұрағыңызды басқаша тұжырымдаңыз.",
-                    "en": "Sorry, there was an error processing your request. Please try again or rephrase your question."
-                }
-                await update.message.reply_text(error_messages[lang])
-                
+                # Кэшируем ответ
+                await self.cache_service.cache_response(text, response)
+            
+            # Отправляем ответ пользователю
+            await update.message.reply_text(response)
+            
+            # Логируем статистику
+            end_time = time.time()
+            response_time = int((end_time - start_time) * 1000)  # в миллисекундах
+            await self.cache_service.log_interaction(
+                user_id=user_id,
+                question=text,
+                answer=response,
+                response_time=response_time,
+                was_cached=was_cached
+            )
+            
         except Exception as e:
             logger.error(f"Error in message handling: {str(e)}", exc_info=True)
-            await update.message.reply_text("An unexpected error occurred. Please try again later.")
-            
+            lang = await self.detect_language(text)
+            error_messages = {
+                "ru": "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз или переформулируйте ваш вопрос.",
+                "kk": "Кешіріңіз, сұрауыңызды өңдеу кезінде қате пайда болды. Қайталап көріңіз немесе сұрағыңызды басқаша тұжырымдаңыз.",
+                "en": "Sorry, there was an error processing your request. Please try again or rephrase your question."
+            }
+            await update.message.reply_text(error_messages[lang])
+
     async def get_openai_response(self, messages: List[Dict]) -> str:
         """Получение ответа от OpenAI API"""
         try:

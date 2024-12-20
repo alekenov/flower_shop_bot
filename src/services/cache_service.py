@@ -1,42 +1,31 @@
 import logging
 import re
 import time
-from collections import defaultdict
+import hashlib
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone
+
+from services.supabase_service import SupabaseService
 
 logger = logging.getLogger(__name__)
 
 class CacheService:
     def __init__(self):
-        # Основной кэш для хранения ответов
-        self.cache: Dict[str, Dict[str, Any]] = {}
-        # Счетчик частоты запросов
-        self.frequency = defaultdict(int)
-        # Время жизни кэша в секундах (1 час)
-        self.ttl = 3600
-        # Минимальное количество запросов для кэширования
-        self.min_frequency = 3
-        # Максимальный размер кэша
-        self.max_cache_size = 1000
+        self.db = SupabaseService()
+        self.similarity_threshold = 0.8
 
     def _normalize_query(self, query: str) -> str:
-        """
-        Нормализует запрос для лучшего matching:
-        - приводит к нижнему регистру
-        - удаляет лишние пробелы
-        - удаляет пунктуацию
-        """
-        # Приводим к нижнему регистру и удаляем лишние пробелы
+        """Нормализует запрос для лучшего matching"""
         normalized = re.sub(r'\s+', ' ', query.lower().strip())
-        # Удаляем пунктуацию, кроме важных символов
         normalized = re.sub(r'[^\w\s]', '', normalized)
         return normalized
 
-    def _is_similar_query(self, query1: str, query2: str, threshold: float = 0.8) -> bool:
-        """
-        Проверяет, являются ли запросы похожими.
-        Использует простое сравнение множеств слов.
-        """
+    def _generate_hash(self, query: str) -> str:
+        """Генерирует хеш для запроса"""
+        return hashlib.md5(query.encode()).hexdigest()
+
+    def _is_similar_query(self, query1: str, query2: str) -> bool:
+        """Проверяет схожесть запросов"""
         words1 = set(query1.split())
         words2 = set(query2.split())
         
@@ -47,97 +36,164 @@ class CacheService:
         shorter_len = min(len(words1), len(words2))
         
         similarity = len(intersection) / shorter_len
-        return similarity >= threshold
+        return similarity >= self.similarity_threshold
 
-    async def get_cached_response(self, query: str) -> Optional[str]:
-        """
-        Получает кэшированный ответ для запроса.
-        Также обновляет счетчик частоты.
-        """
-        normalized_query = self._normalize_query(query)
-        current_time = time.time()
+    async def get_cached_response(self, query: str) -> Optional[Dict[str, Any]]:
+        """Получает кэшированный ответ из БД"""
+        normalized = self._normalize_query(query)
+        query_hash = self._generate_hash(normalized)
 
-        # Проверяем точное совпадение
-        if normalized_query in self.cache:
-            cache_entry = self.cache[normalized_query]
-            # Проверяем не истек ли TTL
-            if current_time - cache_entry['timestamp'] < self.ttl:
-                self.frequency[normalized_query] += 1
-                logger.info(f"Cache hit for query: {query}")
-                return cache_entry['response']
-            else:
-                # Удаляем устаревшую запись
-                del self.cache[normalized_query]
-                logger.info(f"Removed expired cache entry for query: {query}")
+        # Поиск точного совпадения
+        result = self.db.execute_query_single(
+            """
+            SELECT * FROM cache_answers 
+            WHERE question_hash = %s
+            """, 
+            (query_hash,)
+        )
 
-        # Проверяем похожие запросы
-        for cached_query in list(self.cache.keys()):
-            if self._is_similar_query(normalized_query, cached_query):
-                cache_entry = self.cache[cached_query]
-                if current_time - cache_entry['timestamp'] < self.ttl:
-                    self.frequency[cached_query] += 1
-                    logger.info(f"Cache hit for similar query: {query} -> {cached_query}")
-                    return cache_entry['response']
-                else:
-                    del self.cache[cached_query]
-                    logger.info(f"Removed expired cache entry for similar query: {cached_query}")
+        if not result:
+            # Поиск похожих вопросов
+            similar_questions = self.db.execute_query(
+                """
+                SELECT * FROM cache_answers
+                """,
+            )
+            for cached in similar_questions:
+                if self._is_similar_query(normalized, self._normalize_query(cached['question'])):
+                    result = cached
+                    break
 
-        # Увеличиваем счетчик частоты для нового запроса
-        self.frequency[normalized_query] += 1
+        if result:
+            # Обновляем счетчик использования
+            self.db.execute_query(
+                """
+                UPDATE cache_answers 
+                SET hits = hits + 1 
+                WHERE question_hash = %s
+                """,
+                (result['question_hash'],),
+                fetch=False
+            )
+            return result
+
         return None
 
-    async def cache_response(self, query: str, response: str) -> None:
-        """
-        Кэширует ответ для запроса, если он достаточно частый.
-        """
-        normalized_query = self._normalize_query(query)
-        
-        # Кэшируем только если запрос встречается достаточно часто
-        if self.frequency[normalized_query] >= self.min_frequency:
-            # Проверяем размер кэша
-            if len(self.cache) >= self.max_cache_size:
-                # Удаляем наименее частые запросы
-                sorted_queries = sorted(
-                    self.frequency.items(),
-                    key=lambda x: x[1]
-                )
-                for old_query, _ in sorted_queries[:len(self.cache) - self.max_cache_size + 1]:
-                    if old_query in self.cache:
-                        del self.cache[old_query]
-                        logger.info(f"Removed least frequent cache entry: {old_query}")
+    async def cache_response(self, query: str, answer: str) -> None:
+        """Сохраняет ответ в кэш"""
+        normalized = self._normalize_query(query)
+        query_hash = self._generate_hash(normalized)
 
-            # Добавляем новую запись в кэш
-            self.cache[normalized_query] = {
-                'response': response,
-                'timestamp': time.time()
-            }
-            logger.info(f"Added new cache entry for query: {query}")
+        self.db.execute_query(
+            """
+            INSERT INTO cache_answers (question_hash, question, answer)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (question_hash) 
+            DO UPDATE SET 
+                answer = EXCLUDED.answer,
+                last_updated = NOW()
+            """,
+            (query_hash, query, answer),
+            fetch=False
+        )
 
-    async def clear_expired(self) -> None:
-        """
-        Очищает устаревшие записи из кэша.
-        """
-        current_time = time.time()
-        expired_queries = [
-            query for query, entry in self.cache.items()
-            if current_time - entry['timestamp'] >= self.ttl
-        ]
-        
-        for query in expired_queries:
-            del self.cache[query]
-            logger.info(f"Cleared expired cache entry: {query}")
+    async def log_interaction(
+        self, 
+        user_id: int, 
+        question: str, 
+        answer: str, 
+        response_time: int,
+        was_cached: bool
+    ) -> None:
+        """Логирует взаимодействие с пользователем"""
+        self.db.execute_query(
+            """
+            INSERT INTO chat_statistics 
+            (user_id, question, answer, response_time_ms, was_cached)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (user_id, question, answer, response_time, was_cached),
+            fetch=False
+        )
 
-    def get_cache_stats(self) -> Dict[str, Any]:
-        """
-        Возвращает статистику использования кэша.
-        """
-        return {
-            'total_entries': len(self.cache),
-            'frequency_stats': dict(self.frequency),
-            'cache_size': len(self.cache),
-            'most_frequent': sorted(
-                self.frequency.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:5]
+    async def update_feedback(self, question: str, was_helpful: bool) -> None:
+        """Обновляет обратную связь по ответу"""
+        normalized = self._normalize_query(question)
+        query_hash = self._generate_hash(normalized)
+
+        feedback_field = 'positive_feedback' if was_helpful else 'negative_feedback'
+        self.db.execute_query(
+            f"""
+            UPDATE cache_answers 
+            SET {feedback_field} = {feedback_field} + 1
+            WHERE question_hash = %s
+            """,
+            (query_hash,),
+            fetch=False
+        )
+
+    async def get_or_create_context(self, user_id: int) -> Dict[str, Any]:
+        """Получает или создает контекст диалога"""
+        context = self.db.execute_query_single(
+            """
+            SELECT context FROM chat_context
+            WHERE user_id = %s
+            """,
+            (user_id,)
+        )
+
+        if not context:
+            context = {'messages': []}
+            self.db.execute_query(
+                """
+                INSERT INTO chat_context (user_id, context)
+                VALUES (%s, %s)
+                """,
+                (user_id, context),
+                fetch=False
+            )
+
+        return context
+
+    async def update_context(self, user_id: int, context: Dict[str, Any]) -> None:
+        """Обновляет контекст диалога"""
+        self.db.execute_query(
+            """
+            UPDATE chat_context 
+            SET context = %s, last_updated = NOW()
+            WHERE user_id = %s
+            """,
+            (context, user_id),
+            fetch=False
+        )
+
+    def get_statistics(self) -> Dict[str, Any]:
+        """Получает статистику использования"""
+        stats = {
+            'popular_questions': self.db.execute_query(
+                """
+                SELECT question, hits 
+                FROM cache_answers 
+                ORDER BY hits DESC 
+                LIMIT 5
+                """
+            ),
+            'response_times': self.db.execute_query(
+                """
+                SELECT 
+                    AVG(response_time_ms) as avg_time,
+                    MIN(response_time_ms) as min_time,
+                    MAX(response_time_ms) as max_time
+                FROM chat_statistics
+                """
+            )[0],
+            'cache_effectiveness': self.db.execute_query(
+                """
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN was_cached THEN 1 ELSE 0 END) as cached
+                FROM chat_statistics
+                """
+            )[0]
         }
+        return stats
