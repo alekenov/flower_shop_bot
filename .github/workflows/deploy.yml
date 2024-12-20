@@ -10,67 +10,32 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     
-    env:
-      SUPABASE_URL: https://dkohweivbdwweyvyvcbc.supabase.co
-      SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-      DOCKER_IMAGE: flower-shop-bot
-      REGISTRY_HOST: api.supabase.com
-      
     steps:
       - uses: actions/checkout@v3
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      
-      - name: Login to Container Registry
-        uses: docker/login-action@v2
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          registry: ${{ env.REGISTRY_HOST }}
-          username: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-          password: ${{ secrets.SUPABASE_SERVICE_ROLE }}
-      
-      - name: Build and push
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ${{ env.REGISTRY_HOST }}/${{ env.DOCKER_IMAGE }}:latest
-          build-args: |
-            SUPABASE_URL=${{ env.SUPABASE_URL }}
-            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-            SUPABASE_SERVICE_ROLE=${{ secrets.SUPABASE_SERVICE_ROLE }}
-            TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
-            GOOGLE_SERVICE_ACCOUNT=${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
-      
-      - name: Deploy to Supabase
+          python-version: '3.11'
+          
+      - name: Install dependencies
         run: |
-          curl -X POST "${{ env.SUPABASE_URL }}/rest/v1/rpc/deploy_container" \
-          -H "apikey: ${{ secrets.SUPABASE_SERVICE_ROLE }}" \
-          -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_ROLE }}" \
-          -H "Content-Type: application/json" \
-          -d '{
-            "name": "flower-shop-bot",
-            "image": "${{ env.REGISTRY_HOST }}/${{ env.DOCKER_IMAGE }}:latest",
-            "env": {
-              "SUPABASE_URL": "${{ env.SUPABASE_URL }}",
-              "SUPABASE_SERVICE_ROLE": "${{ secrets.SUPABASE_SERVICE_ROLE }}",
-              "SUPABASE_ANON_KEY": "${{ secrets.SUPABASE_ANON_KEY }}",
-              "TELEGRAM_BOT_TOKEN": "${{ secrets.TELEGRAM_BOT_TOKEN }}",
-              "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
-              "GOOGLE_SERVICE_ACCOUNT": "${{ secrets.GOOGLE_SERVICE_ACCOUNT }}",
-              "SUPABASE_DB_HOST": "aws-0-eu-central-1.pooler.supabase.com",
-              "SUPABASE_DB_PORT": "6543",
-              "SUPABASE_DB_NAME": "postgres",
-              "SUPABASE_DB_USER": "postgres.dkohweivbdwweyvyvcbc",
-              "SUPABASE_DB_PASSWORD": "${{ secrets.SUPABASE_DB_PASSWORD }}"
-            },
-            "port": 8080,
-            "healthcheck": {
-              "path": "/health",
-              "interval": "30s",
-              "timeout": "10s",
-              "retries": 3
-            }
-          }'
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+      - name: Deploy to Cloud
+        env:
+          SUPABASE_URL: https://dkohweivbdwweyvyvcbc.supabase.co
+          SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          SUPABASE_DB_HOST: aws-0-eu-central-1.pooler.supabase.com
+          SUPABASE_DB_PORT: 6543
+          SUPABASE_DB_NAME: postgres
+          SUPABASE_DB_USER: postgres.dkohweivbdwweyvyvcbc
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          # Start the bot
+          python src/telegram_bot.py
