@@ -1,14 +1,12 @@
 import os
 import json
 import logging
-import psycopg2
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from src.config.config import Config
-from datetime import datetime
+from services.config_service import config_service
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +14,21 @@ class SheetsService:
     def __init__(self):
         """Initialize the Google Sheets service."""
         try:
-            config = Config()
-            self.spreadsheet_id = config.GOOGLE_SHEETS_SPREADSHEET_ID
+            self.spreadsheet_id = config_service.get_config('GOOGLE_SHEETS_SPREADSHEET_ID')
+            if not self.spreadsheet_id:
+                raise ValueError("Google Sheets spreadsheet ID not found in config")
             
             logger.info(f"Initializing Google Sheets service with spreadsheet ID: {self.spreadsheet_id}")
             
-            # Load credentials
-            self.credentials = self._load_credentials()
+            # Load credentials from service account JSON
+            service_account_info = json.loads(config_service.get_config('GOOGLE_SERVICE_ACCOUNT'))
+            if not service_account_info:
+                raise ValueError("Google service account credentials not found in config")
+                
+            self.credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
+            )
             logger.info("Successfully loaded credentials")
             
             # Build the service
@@ -40,64 +46,30 @@ class SheetsService:
             logger.error(f"Failed to initialize Google Sheets service: {str(e)}", exc_info=True)
             raise
 
-    def _get_credentials_from_db(self):
-        """Get Google credentials from Supabase database."""
-        conn = psycopg2.connect(
-            host="aws-0-eu-central-1.pooler.supabase.com",
-            database="postgres",
-            user="postgres.dkohweivbdwweyvyvcbc",
-            password="vigkif-nesJy2-kivraq",
-            port="6543"
-        )
-        try:
-            with conn.cursor() as cur:
-                cur.execute("SELECT credentials FROM google_credentials ORDER BY created_at DESC LIMIT 1;")
-                result = cur.fetchone()
-                if result:
-                    return result[0]
-                raise Exception("No credentials found in database")
-        finally:
-            conn.close()
-
-    def _load_credentials(self):
-        """Load Google Sheets credentials from database."""
-        try:
-            logger.info("Loading credentials from database")
-            credentials_info = self._get_credentials_from_db()
-            return service_account.Credentials.from_service_account_info(
-                credentials_info,
-                scopes=['https://www.googleapis.com/auth/spreadsheets']
-            )
-        except Exception as e:
-            logger.error(f"Failed to load credentials: {str(e)}", exc_info=True)
-            raise
-
     def _verify_access(self):
         """Verify access to the spreadsheet."""
         try:
-            result = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
-            logger.info(f"Successfully accessed spreadsheet: {result.get('properties', {}).get('title')}")
+            self.service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
+            ).execute()
         except Exception as e:
-            logger.error(f"Failed to verify access to spreadsheet: {str(e)}", exc_info=True)
+            logger.error(f"Failed to verify access to spreadsheet: {str(e)}")
             raise
 
     def _get_sheet_names(self):
         """Get all sheet names from the spreadsheet."""
         try:
-            spreadsheet = self.service.spreadsheets().get(spreadsheetId=self.spreadsheet_id).execute()
-            sheets = spreadsheet.get('sheets', [])
-            sheet_names = [sheet['properties']['title'] for sheet in sheets]
-            return sheet_names
+            result = self.service.spreadsheets().get(
+                spreadsheetId=self.spreadsheet_id
+            ).execute()
+            return [sheet['properties']['title'] for sheet in result['sheets']]
         except Exception as e:
-            logger.error(f"Failed to get sheet names: {str(e)}", exc_info=True)
-            raise
+            logger.error(f"Failed to get sheet names: {str(e)}")
+            return []
 
-    async def get_inventory_data(self):
+    def get_inventory_data(self):
         """Get inventory data from Google Sheets."""
         try:
-            logger.info(f"Getting inventory data from spreadsheet {self.spreadsheet_id}")
-            
-            # Пробуем разные варианты названия листа
             possible_ranges = ['Catalog!A2:E', 'Sheet1!A2:E', 'Лист1!A2:E', 'Каталог!A2:E']
             values = []
             
@@ -126,58 +98,66 @@ class SheetsService:
             for i, row in enumerate(values, start=2):
                 try:
                     # Убедимся, что у нас есть все необходимые колонки
-                    while len(row) < 5:
+                    while len(row) < 4:
                         row.append('')  # Добавляем пустые значения если не хватает колонок
                     
                     # Очищаем и проверяем значения
-                    name = row[0].strip()
-                    quantity = row[1].strip()
-                    price = row[2].strip()
-                    description = row[3].strip()
-                    category = row[4].strip()
+                    name = row[0].strip() if row[0] else ''
+                    price = row[1].strip() if len(row) > 1 else ''
+                    quantity = row[2].strip() if len(row) > 2 else ''
+                    description = row[3].strip() if len(row) > 3 else ''
                     
-                    # Проверяем, что name не пустой
+                    # Проверяем обязательные поля
                     if not name:
+                        logger.warning(f"Пропускаем строку {i}: отсутствует название")
+                        continue
+                    
+                    # Преобразуем price в число
+                    try:
+                        price_clean = ''.join(c for c in price if c.isdigit() or c == '.')
+                        if price_clean:
+                            price_value = float(price_clean)
+                            if price_value <= 0:
+                                logger.warning(f"Пропускаем строку {i}: некорректная цена {price}")
+                                continue
+                            price = f"{int(price_value)} тенге"
+                        else:
+                            logger.warning(f"Пропускаем строку {i}: отсутствует цена")
+                            continue
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Пропускаем строку {i}: ошибка при обработке цены {price}: {e}")
                         continue
                     
                     # Преобразуем quantity в число
                     try:
                         quantity = int(quantity) if quantity.isdigit() else 0
-                    except (ValueError, TypeError):
+                        if quantity < 0:
+                            logger.warning(f"Корректируем отрицательное количество в строке {i}")
+                            quantity = 0
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Ошибка при обработке количества в строке {i}: {e}")
                         quantity = 0
-                    
-                    # Преобразуем price в строку с "тенге"
-                    try:
-                        # Удаляем все нечисловые символы, кроме точки
-                        price_clean = ''.join(c for c in price if c.isdigit() or c == '.')
-                        if price_clean:
-                            price = str(float(price_clean)) + " тенге"
-                        else:
-                            price = "0 тенге"
-                    except (ValueError, TypeError):
-                        price = "0 тенге"
                     
                     item = {
                         'name': name,
-                        'quantity': quantity,
                         'price': price,
-                        'description': description,
-                        'category': category or 'Разное'
+                        'quantity': quantity,
+                        'description': description
                     }
                     
-                    logger.info(f"Processed row {i}: {item}")
+                    logger.info(f"Обработана строка {i}: {item}")
                     inventory.append(item)
                     
                 except Exception as e:
-                    logger.error(f"Error processing row {i}: {e}", exc_info=True)
-                    logger.error(f"Problematic row data: {row}")
+                    logger.error(f"Ошибка при обработке строки {i}: {e}", exc_info=True)
+                    logger.error(f"Проблемная строка: {row}")
                     continue
             
-            logger.info(f"Successfully processed {len(inventory)} items")
+            logger.info(f"Успешно обработано {len(inventory)} товаров")
             return inventory
             
         except Exception as e:
-            logger.error(f"Failed to get inventory data: {str(e)}", exc_info=True)
+            logger.error(f"Ошибка при получении данных: {str(e)}", exc_info=True)
             return []
 
     def format_inventory_for_openai(self, inventory):
@@ -185,93 +165,25 @@ class SheetsService:
         if not inventory:
             return "В данный момент информация о наличии цветов недоступна."
         
-        # Группируем товары по категориям
-        categories = {}
+        # Форматируем каждый товар
+        items = []
         for item in inventory:
-            category = item.get('category', 'Разное').strip() or 'Разное'
-            if category not in categories:
-                categories[category] = []
-            categories[category].append(item)
+            name = item.get('name', '').strip()
+            price = item.get('price', '0 тенге').strip()
+            quantity = item.get('quantity', 0)
+            description = item.get('description', '').strip()
+            
+            # Добавляем информацию о наличии
+            availability = "в наличии" if quantity > 0 else "нет в наличии"
+            
+            # Формируем строку с описанием товара
+            item_str = f"- {name} ({price})"
+            if description:
+                item_str += f" - {description}"
+            
+            items.append(item_str)
         
-        # Форматируем вывод
-        output = []
-        for category, items in categories.items():
-            output.append(f"\n {category.upper()}:")
-            for item in items:
-                name = item.get('name', '').strip()
-                quantity = item.get('quantity', 0)
-                price = item.get('price', '0').replace('тенге', '').strip()
-                description = item.get('description', '').strip()
-                
-                # Форматируем строку товара
-                item_str = f"• {name}"
-                if price:
-                    item_str += f" - {price} тенге"
-                if quantity < 10 and quantity > 0:
-                    item_str += f" (осталось {quantity} шт.)"
-                elif quantity <= 0:
-                    item_str += " (нет в наличии)"
-                if description:
-                    item_str += f"\n  {description}"
-                
-                output.append(item_str)
-        
-        return "\n".join(output)
-
-    def _validate_item_data(self, item_data: dict) -> tuple[bool, str]:
-        """Validate item data before updating or adding to sheets.
-        
-        Args:
-            item_data (dict): Dictionary containing item data to validate
-            
-        Returns:
-            tuple[bool, str]: (is_valid, error_message)
-        """
-        try:
-            required_fields = ['name']
-            for field in required_fields:
-                if field not in item_data or not item_data[field]:
-                    return False, f"Missing required field: {field}"
-            
-            if 'quantity' in item_data:
-                try:
-                    quantity = int(item_data['quantity'])
-                    if quantity < 0:
-                        return False, "Quantity cannot be negative"
-                except ValueError:
-                    return False, "Quantity must be a valid number"
-            
-            if 'price' in item_data:
-                try:
-                    price = float(str(item_data['price']).replace(' тенге', ''))
-                    if price < 0:
-                        return False, "Price cannot be negative"
-                except ValueError:
-                    return False, "Price must be a valid number"
-            
-            return True, ""
-        except Exception as e:
-            logger.error(f"Error validating item data: {str(e)}", exc_info=True)
-            return False, f"Validation error: {str(e)}"
-
-    def _get_row_hash(self, row: list) -> str:
-        """Generate a hash for a row to detect changes.
-        
-        Args:
-            row (list): Row data to hash
-            
-        Returns:
-            str: Hash of the row data
-        """
-        import hashlib
-        row_str = '|'.join(str(cell) for cell in row)
-        return hashlib.md5(row_str.encode()).hexdigest()
-
-    def _get_version_sheet_name(self) -> str:
-        """Get the name of the version tracking sheet."""
-        from datetime import datetime
-        current_date = datetime.now().strftime('%Y_%m')
-        return f'Version_{current_date}'
+        return "\n".join(items)
 
     async def update_inventory_item(self, item_name: str, updates: dict):
         """Update inventory item data in Google Sheets."""
@@ -356,6 +268,61 @@ class SheetsService:
         except Exception as e:
             logger.error(f"Failed to update inventory item: {str(e)}", exc_info=True)
             return False
+
+    def _validate_item_data(self, item_data: dict) -> tuple[bool, str]:
+        """Validate item data before updating or adding to sheets.
+        
+        Args:
+            item_data (dict): Dictionary containing item data to validate
+            
+        Returns:
+            tuple[bool, str]: (is_valid, error_message)
+        """
+        try:
+            required_fields = ['name']
+            for field in required_fields:
+                if field not in item_data or not item_data[field]:
+                    return False, f"Missing required field: {field}"
+            
+            if 'quantity' in item_data:
+                try:
+                    quantity = int(item_data['quantity'])
+                    if quantity < 0:
+                        return False, "Quantity cannot be negative"
+                except ValueError:
+                    return False, "Quantity must be a valid number"
+            
+            if 'price' in item_data:
+                try:
+                    price = float(str(item_data['price']).replace(' тенге', ''))
+                    if price < 0:
+                        return False, "Price cannot be negative"
+                except ValueError:
+                    return False, "Price must be a valid number"
+            
+            return True, ""
+        except Exception as e:
+            logger.error(f"Error validating item data: {str(e)}", exc_info=True)
+            return False, f"Validation error: {str(e)}"
+
+    def _get_row_hash(self, row: list) -> str:
+        """Generate a hash for a row to detect changes.
+        
+        Args:
+            row (list): Row data to hash
+            
+        Returns:
+            str: Hash of the row data
+        """
+        import hashlib
+        row_str = '|'.join(str(cell) for cell in row)
+        return hashlib.md5(row_str.encode()).hexdigest()
+
+    def _get_version_sheet_name(self) -> str:
+        """Get the name of the version tracking sheet."""
+        from datetime import datetime
+        current_date = datetime.now().strftime('%Y_%m')
+        return f'Version_{current_date}'
 
     def _ensure_version_sheet_exists(self, sheet_name: str):
         """Ensure version tracking sheet exists with correct headers."""

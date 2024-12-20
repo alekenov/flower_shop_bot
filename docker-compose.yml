@@ -3,8 +3,16 @@ version: '3.8'
 services:
   bot:
     build: .
-    env_file:
-      - .env
-    volumes:
-      - .:/app
+    container_name: flower-shop-bot
+    environment:
+      - SUPABASE_DB_HOST=aws-0-eu-central-1.pooler.supabase.com
+      - SUPABASE_DB_PORT=6543
+      - SUPABASE_DB_NAME=postgres
+      - SUPABASE_DB_USER=postgres.dkohweivbdwweyvyvcbc
+      - SUPABASE_DB_PASSWORD=vigkif-nesJy2-kivraq
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     restart: always

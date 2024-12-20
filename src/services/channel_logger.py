@@ -1,7 +1,7 @@
 import logging
 from telegram import Bot
 from telegram.constants import ParseMode
-from src.config.config import Config
+from services.config_service import config_service
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -10,7 +10,7 @@ class ChannelLogger:
     def __init__(self):
         """Initialize the channel logger."""
         try:
-            config = Config()
+            config = config_service
             self.bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
             self.log_channel_id = config.TELEGRAM_LOG_CHANNEL_ID
             self._message_queue = asyncio.Queue()

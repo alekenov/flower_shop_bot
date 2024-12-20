@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Вход через Instagram</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #fafafa;
+        }
+        .container {
+            text-align: center;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .login-button {
+            background-color: #0095f6;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 16px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin-top: 20px;
+        }
+        .login-button:hover {
+            background-color: #0081d6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Вход через Instagram</h1>
+        <p>Нажмите кнопку ниже для входа через ваш Instagram аккаунт</p>
+        <a href="https://www.instagram.com/oauth/authorize?enable_fb_login=0&force_authentication=0&client_id=1106909074426380&redirect_uri=https://becomes-easier-five-mesh.trycloudflare.com/instagram/auth&scope=business_management,instagram_manage_messages,pages_manage_metadata,pages_messaging,pages_show_list,pages_read_engagement&response_type=code" class="login-button">
+            Войти через Instagram
+        </a>
+    </div>
+</body>
+</html>

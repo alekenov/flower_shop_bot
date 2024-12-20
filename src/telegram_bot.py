@@ -3,9 +3,12 @@ import json
 import logging
 import asyncio
 import re
+import time
 from typing import Dict, List, Optional
 from datetime import datetime
 import signal
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import threading
 
 from openai import AsyncOpenAI
 from telegram import Update
@@ -13,6 +16,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 
 from function_handlers import TOOL_DEFINITIONS, execute_function
 from services.config_service import config_service
+from services.cache_service import CacheService
+from services.docs_service import DocsService
 
 # Setup logging
 logging.basicConfig(
@@ -23,41 +28,82 @@ logger = logging.getLogger(__name__)
 
 # Системные сообщения для разных языков
 SYSTEM_MESSAGES = {
-    "ru": """Вы - помощник цветочного магазина Cvety.kz. Помогайте клиентам с:
-    - Выбором и заказом цветов и букетов
-    - Оформлением доставки
-    - Отслеживанием статуса заказа
-    - Подтверждением фото букета
-    - Обработкой возвратов
-    Общайтесь вежливо и профессионально. Используйте предоставленные инструменты для помощи клиентам.""",
-    
-    "kk": """Сіз Cvety.kz гүл дүкенінің көмекшісіз. Клиенттерге көмектесіңіз:
-    - Гүлдер мен букеттерді таңдау және тапсырыс беру
-    - Жеткізуді рәсімдеу
-    - Тапсырыс күйін бақылау
-    - Букет фотосын растау
-    - Қайтаруды өңдеу
-    Сыпайы және кәсіби түрде қарым-қатынас жасаңыз. Клиенттерге көмектесу үшін берілген құралдарды пайдаланыңыз.""",
-    
-    "en": """You are a Cvety.kz flower shop assistant. Help customers with:
-    - Selecting and ordering flowers and bouquets
-    - Arranging delivery
-    - Tracking order status
-    - Confirming bouquet photos
-    - Processing returns
-    Communicate politely and professionally. Use the provided tools to assist customers."""
+    "ru": """Ты - помощник цветочного магазина Cvety.kz. Твоя главная задача - давать точные и краткие ответы на основе предоставленной информации из базы знаний.
+
+ВАЖНЫЕ ПРАВИЛА:
+1. Используй ТОЛЬКО информацию из базы знаний
+2. Отвечай МАКСИМАЛЬНО КРАТКО, без лишних слов
+3. Если точной информации нет в базе знаний - ответь "Извините, у меня нет точной информации об этом"
+4. НИКОГДА не придумывай информацию
+5. Не используй вежливые обороты и дополнительные фразы
+6. Давай только факты из базы знаний
+
+Примеры правильных ответов:
+- На вопрос "Какой адрес?": "Достык 5"
+- На вопрос "Время работы?": "9:00-20:00"
+- На вопрос "Способы оплаты?": "Наличные, банковские карты, Kaspi"
+
+Примеры неправильных ответов:
+❌ "Мы находимся по адресу Достык 5. Будем рады видеть вас!"
+❌ "Наш магазин работает ежедневно с 9 утра до 8 вечера"
+❌ "У нас есть несколько удобных способов оплаты..."
+
+Помни: чем короче и точнее ответ, тем лучше.""",
+
+    "kk": """Сіз Cvety.kz гүл дүкенінің көмекшісіз. Сіздің басты міндетіңіз - білім базасындағы ақпарат негізінде нақты және қысқа жауаптар беру.
+
+МАҢЫЗДЫ ЕРЕЖЕЛЕР:
+1. ТЕК білім базасындағы ақпаратты пайдаланыңыз
+2. Артық сөздерсіз МАКСИМАЛДЫ ҚЫСҚА жауап беріңіз
+3. Егер нақты ақпарат болмаса - "Кешіріңіз, бұл туралы нақты ақпаратым жоқ" деп жауап беріңіз
+4. ЕШҚАШАН ақпаратты ойдан шығармаңыз
+5. Сыпайы сөздер мен қосымша сөйлемдерді қолданбаңыз
+6. Тек білім базасындағы фактілерді беріңіз""",
+
+    "en": """You are the assistant of Cvety.kz flower shop. Your main task is to provide accurate and concise answers based on the provided knowledge base information.
+
+IMPORTANT RULES:
+1. Use ONLY information from the knowledge base
+2. Answer VERY BRIEFLY, without extra words
+3. If exact information is not available - reply "Sorry, I don't have exact information about this"
+4. NEVER make up information
+5. Don't use polite phrases and additional sentences
+6. Provide only facts from the knowledge base"""
 }
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            response = json.dumps({'status': 'healthy', 'timestamp': datetime.now().isoformat()})
+            self.wfile.write(response.encode())
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+def run_health_server():
+    server = HTTPServer(('', 8000), HealthCheckHandler)
+    server.serve_forever()
 
 class FlowerShopBot:
     def __init__(self):
         """Initialize bot with application instance"""
         self.is_running = False
         
-        # Initialize OpenAI client
+        # Start health check server
+        self.health_thread = threading.Thread(target=run_health_server, daemon=True)
+        self.health_thread.start()
+        
+        # Initialize services
         self.openai_api_key = config_service.get_config('OPENAI_API_KEY')
         if not self.openai_api_key:
             raise ValueError("OpenAI API key not found in database")
         self.client = AsyncOpenAI(api_key=self.openai_api_key)
+        
+        self.cache_service = CacheService()
+        self.docs_service = DocsService()
 
         # Get bot token
         self.bot_token = config_service.get_config('TELEGRAM_BOT_TOKEN_DEV')
@@ -146,63 +192,101 @@ How can I assist you?"""
             
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Обработка входящих сообщений"""
+        text = update.message.text
+        user_id = update.effective_user.id
+        
         try:
-            # Получаем текст сообщения
-            text = update.message.text
-            logger.info(f"Received message: {text}")
+            start_time = time.time()
+            
+            logger.info(f"Received message from user {user_id}: {text}")
             
             # Отправляем индикатор набора текста
             await update.message.chat.send_chat_action(action="typing")
-            logger.info("Sent typing action")
-
+            
             # Определяем язык сообщения
             lang = await self.detect_language(text)
-            logger.info(f"Detected language: {lang}")
-
+            
+            # Получаем или создаем контекст диалога
+            context_data = await self.cache_service.get_or_create_context(user_id)
+            
+            # Получаем релевантные части базы знаний
+            relevant_knowledge = await self.docs_service.get_relevant_knowledge(text)
+            logger.info(f"Found relevant knowledge: {relevant_knowledge}")
+            
             # История сообщений пользователя
-            if 'messages' not in context.user_data:
-                logger.info("Initializing message history")
-                context.user_data['messages'] = []
-                context.user_data['current_lang'] = lang
+            if 'messages' not in context_data:
+                context_data['messages'] = []
             
-            # Добавляем системное сообщение, если это первое сообщение или язык изменился
-            if (not context.user_data['messages'] or 
-                context.user_data['current_lang'] != lang):
-                logger.info(f"Setting system message for language: {lang}")
-                context.user_data['messages'] = [{"role": "system", "content": SYSTEM_MESSAGES[lang]}]
-                context.user_data['current_lang'] = lang
+            # Формируем системное сообщение
+            system_message = SYSTEM_MESSAGES[lang]
+            if "информация не найдена" not in relevant_knowledge.lower():
+                system_message += f"""
 
-            # Добавляем сообщение пользователя
-            context.user_data['messages'].append({"role": "user", "content": text})
-            logger.info("Added user message to history")
+ДОСТУПНАЯ ИНФОРМАЦИЯ ИЗ БАЗЫ ЗНАНИЙ:
+{relevant_knowledge}
+
+ПОМНИ: 
+1. Используй ТОЛЬКО эту информацию для ответа
+2. Отвечай МАКСИМАЛЬНО КРАТКО
+3. Только факты, без лишних слов"""
             
-            try:
-                # Получаем ответ от OpenAI
-                logger.info("Requesting OpenAI response")
-                response = await self.get_openai_response(context.user_data['messages'])
-                logger.info(f"OpenAI response received: {response}")
-                
-                # Добавляем ответ ассистента в историю
-                context.user_data['messages'].append({"role": "assistant", "content": response})
-                logger.info("Added assistant response to history")
-                
-                # Отправляем ответ пользователю
-                await update.message.reply_text(response)
-                logger.info("Sent response to user")
-                
-            except Exception as e:
-                logger.error(f"Error in OpenAI communication: {str(e)}", exc_info=True)
-                error_messages = {
-                    "ru": "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз или переформулируйте ваш вопрос.",
-                    "kk": "Кешіріңіз, сұрауыңызды өңдеу кезінде қате пайда болды. Қайталап көріңіз немесе сұрағыңызды басқаша тұжырымдаңыз.",
-                    "en": "Sorry, there was an error processing your request. Please try again or rephrase your question."
-                }
-                await update.message.reply_text(error_messages[lang])
-                
+            # Обновляем или добавляем системное сообщение
+            if context_data['messages'] and context_data['messages'][0]["role"] == "system":
+                context_data['messages'][0]["content"] = system_message
+            else:
+                context_data['messages'].insert(0, {
+                    "role": "system",
+                    "content": system_message
+                })
+            
+            # Добавляем сообщение пользователя
+            context_data['messages'].append({
+                "role": "user", 
+                "content": f"Вопрос: {text}"
+            })
+            
+            # Получаем ответ от OpenAI
+            response = await self.get_openai_response(context_data['messages'])
+            
+            # Если информация не найдена в базе знаний, добавляем вопрос в список необработанных
+            if "информация не найдена" in relevant_knowledge.lower():
+                await self.docs_service.add_unanswered_question(
+                    question=text,
+                    user_id=user_id,
+                    bot_response=response,
+                    response_type="Нет информации в базе знаний"
+                )
+            
+            # Добавляем ответ в контекст
+            context_data['messages'].append({"role": "assistant", "content": response})
+            
+            # Обновляем контекст в базе
+            await self.cache_service.update_context(user_id, context_data)
+            
+            # Отправляем ответ пользователю
+            await update.message.reply_text(response)
+            
+            # Логируем статистику
+            end_time = time.time()
+            response_time = int((end_time - start_time) * 1000)  # в миллисекундах
+            await self.cache_service.log_interaction(
+                user_id=user_id,
+                question=text,
+                answer=response,
+                response_time=response_time,
+                was_cached=False
+            )
+            
         except Exception as e:
             logger.error(f"Error in message handling: {str(e)}", exc_info=True)
-            await update.message.reply_text("An unexpected error occurred. Please try again later.")
-            
+            lang = await self.detect_language(text)
+            error_messages = {
+                "ru": "Извините, произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте еще раз или переформулируйте ваш вопрос.",
+                "kk": "Кешіріңіз, сұрауыңызды өңдеу кезінде қате пайда болды. Қайталап көріңіз немесе сұрағыңызды басқаша тұжырымдаңыз.",
+                "en": "Sorry, there was an error processing your request. Please try again or rephrase your question."
+            }
+            await update.message.reply_text(error_messages[lang])
+
     async def get_openai_response(self, messages: List[Dict]) -> str:
         """Получение ответа от OpenAI API"""
         try:
@@ -286,58 +370,58 @@ How can I assist you?"""
         if self.is_running:
             logger.info("Stopping bot...")
             self.is_running = False
-            if self.application.updater:
-                await self.application.updater.stop()
-            await self.application.stop()
-            await self.application.shutdown()
-            logger.info("Bot stopped")
-            
-    async def run(self):
-        """Run the bot"""
+            try:
+                await self.application.stop()
+                await self.application.shutdown()
+                logger.info("Bot stopped")
+            except Exception as e:
+                logger.error(f"Error stopping bot: {str(e)}")
+
+    def run_polling(self):
+        """Run the bot with polling"""
         try:
-            if not self.is_running:
-                self.is_running = True
-                logger.info("Starting bot...")
-                await self.application.initialize()
-                await self.application.start()
-                await self.application.updater.start_polling(drop_pending_updates=True)
-                logger.info("Bot is running...")
-                
-                # Keep the bot running until stop() is called
-                while self.is_running:
-                    await asyncio.sleep(1)
-                    
+            logger.info("Starting bot...")
+            self.is_running = True
+            self.application.run_polling(
+                allowed_updates=Update.ALL_TYPES,
+                drop_pending_updates=True,
+                close_loop=False
+            )
         except Exception as e:
-            logger.error(f"Error in polling: {str(e)}")
+            logger.error(f"Error running bot: {str(e)}")
             raise
         finally:
-            await self.stop()
+            self.is_running = False
 
-def handle_signals():
-    """Setup signal handlers"""
-    loop = asyncio.get_event_loop()
-    
-    def signal_handler():
-        logger.info("Received stop signal")
-        if bot and bot.is_running:
-            loop.create_task(bot.stop())
-    
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, signal_handler)
-
-async def main():
+def main():
     """Main function to run the bot"""
     global bot
     try:
+        # Проверяем, не запущен ли уже бот
+        logger.info("Checking for existing bot instances...")
+        import psutil
+        current_pid = os.getpid()
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.pid != current_pid and 'python' in proc.name().lower():
+                    cmdline = proc.cmdline()
+                    if any('telegram_bot.py' in cmd for cmd in cmdline):
+                        logger.warning(f"Found existing bot instance (PID: {proc.pid}). Terminating...")
+                        proc.terminate()
+                        proc.wait(timeout=5)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired):
+                pass
+
+        logger.info("Starting new bot instance...")
         bot = FlowerShopBot()
-        handle_signals()
-        await bot.run()
+        bot.run_polling()
+    except KeyboardInterrupt:
+        logger.info("Received KeyboardInterrupt")
     except Exception as e:
-        logger.error(f"Bot stopped due to error: {str(e)}")
-        if bot:
-            await bot.stop()
-        raise
+        logger.error(f"Error in main: {str(e)}")
+    finally:
+        if bot and bot.is_running:
+            asyncio.run(bot.stop())
 
 if __name__ == '__main__':
-    bot = None
-    asyncio.run(main())
+    main()
