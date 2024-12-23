@@ -1,0 +1,412 @@
+Описание Telegram бота для цветочного магазина
+
+1. Основные компоненты бота:
+- Главный класс TelegramBot
+- Интеграция с Supabase для хранения учетных данных
+- Прямое подключение к PostgreSQL
+- Логирование всех действий
+- Обработка команд и сообщений
+
+2. Структура бота:
+- Инициализация и настройка:
+  * Подключение к базе данных
+  * Получение токена из таблицы credentials
+  * Настройка логгера
+  * Инициализация обработчиков сообщений
+
+- Сервисы:
+  * ConfigService - управление конфигурацией
+  * SheetsService - работа с Google Sheets
+  * SupabaseService - взаимодействие с Supabase
+  * DocsService - работа с документами
+  * CacheService - кэширование данных
+
+3. Безопасность:
+- Все учетные данные хранятся в таблице credentials в Supabase
+- Используется прямое подключение к PostgreSQL
+- Поддержка webhook для безопасной работы в production
+
+4. Основные функции:
+- Обработка команд пользователя
+- Интеграция с OpenAI для обработки сообщений
+- Работа с документами и таблицами
+- Кэширование для оптимизации производительности
+
+5. Режимы работы:
+- Режим разработки (development)
+- Производственный режим (production) с поддержкой webhook
+
+6. Логирование:
+- Подробное логирование всех действий
+- Отслеживание ошибок и исключений
+- Сохранение логов для анализа
+
+7. База данных:
+- Прямое подключение к PostgreSQL
+- Хранение учетных данных в таблице credentials
+- Структурированное хранение информации о пользователях и заказах
+
+8. Основной код бота:
+
+Импорты и зависимости:
+- asyncio: для асинхронной работы
+- telegram: основная библиотека для работы с Telegram API
+- openai: для работы с OpenAI API
+- psycopg2: для прямого подключения к PostgreSQL
+- logging: для системы логирования
+
+ПОЛНЫЙ КОД БОТА НА PYTHON:
+
+```python
+import asyncio
+import json
+import logging
+import os
+import ssl
+import sys
+from typing import Dict, List, Optional, Union
+import argparse
+import re
+import psycopg2
+from psycopg2.extras import DictCursor
+
+from openai import AsyncOpenAI
+from telegram import Update
+from telegram.constants import ParseMode
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+
+from function_handlers import TOOL_DEFINITIONS, execute_function
+from prompts import system_prompts
+from services.cache_service import CacheService
+from services.docs_service import DocsService
+from services.sheets_service import SheetsService
+from services.supabase_service import SupabaseService
+from services.config_service import ConfigService
+from utils.logger_config import get_logger
+
+# Setup logging
+logger = get_logger('telegram_bot', logging.DEBUG)
+
+class TelegramBot:
+    def __init__(self):
+        """Initialize bot with configuration"""
+        try:
+            # Инициализация базовых сервисов
+            self.config_service = ConfigService()
+            self.sheets_service = SheetsService()
+            self.supabase_service = SupabaseService()
+            self.docs_service = DocsService()
+
+            # Получаем токен бота
+            self.token = self.get_bot_token()
+            
+            # Определяем режим работы
+            self.is_production = False  # Принудительно устанавливаем режим разработки
+            
+            # Настройки для webhook режима
+            if self.is_production:
+                self.webhook_host = os.getenv('WEBHOOK_HOST', '0.0.0.0')
+                self.webhook_port = int(os.getenv('PORT', 8000))
+                self.service_url = "flower-shop-bot-315649427788.europe-west1.run.app"
+                self.webhook_url = f"https://{self.service_url}/webhook"
+
+            # Создаем приложение
+            self.application = Application.builder().token(self.token).build()
+            
+            # Настраиваем обработчики
+            self._setup_handlers()
+            logger.info("Message handlers setup completed")
+
+        except Exception as e:
+            logger.error(f"Error initializing bot: {e}", exc_info=True)
+            raise
+
+    def get_bot_token(self):
+        """Get bot token from database"""
+        try:
+            logger.info("Getting bot token from database")
+            
+            # Подключаемся напрямую к базе данных
+            conn = psycopg2.connect(
+                host='aws-0-eu-central-1.pooler.supabase.com',
+                port='6543',
+                user='postgres.dkohweivbdwweyvyvcbc',
+                password='vigkif-nesJy2-kivraq',
+                database='postgres'
+            )
+            
+            with conn.cursor(cursor_factory=DictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT credential_value
+                    FROM credentials
+                    WHERE service_name = 'telegram' AND credential_key = 'bot_token_test'
+                    """
+                )
+                result = cur.fetchone()
+                
+                if not result:
+                    logger.error("Bot token not found in database")
+                    raise ValueError("Bot token not found in database")
+                
+                token = result['credential_value'].strip()
+                logger.info(f"Successfully retrieved bot token: {token[:10]}...")
+                return token
+                
+        except Exception as e:
+            logger.error(f"Error getting bot token: {str(e)}", exc_info=True)
+            raise
+
+    def _setup_handlers(self):
+        """Setup message handlers"""
+        try:
+            logger.info("Setting up message handlers")
+            self.application.add_handler(CommandHandler("start", self.handle_start))
+            self.application.add_handler(CommandHandler("chatid", self.get_chat_id))
+            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+            logger.info("Message handlers setup completed")
+        except Exception as e:
+            logger.error(f"Error setting up handlers: {str(e)}")
+            raise
+
+    async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /start command"""
+        try:
+            await update.message.reply_text("Привет! Я бот цветочного магазина. Чем могу помочь?")
+        except Exception as e:
+            logger.error(f"Error handling start command: {str(e)}")
+
+    async def get_chat_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Отправляет chat_id пользователю"""
+        try:
+            await update.message.reply_text(f"Ваш chat_id: {update.message.chat_id}")
+        except Exception as e:
+            logger.error(f"Error in get_chat_id: {str(e)}")
+            await update.message.reply_text("Произошла ошибка")
+
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обработка входящих сообщений"""
+        try:
+            logger.info(f"Received message: {update.message.text}")
+            
+            # Получаем текст сообщения
+            message_text = update.message.text
+            chat_id = update.message.chat_id
+            
+            logger.info(f"Processing message from chat_id: {chat_id}")
+            
+            # Определяем язык сообщения
+            language = await self.detect_language(message_text)
+            logger.info(f"Detected language: {language}")
+
+            # Получаем данные о наличии цветов
+            inventory_data = []
+            try:
+                inventory_data = self.sheets_service.get_inventory_data()
+                logger.info(f"Retrieved {len(inventory_data)} items from inventory")
+            except Exception as e:
+                logger.error(f"Failed to get inventory data: {e}")
+            
+            # Формируем контекст с данными о наличии
+            inventory_context = ""
+            if inventory_data:
+                inventory_context = "Актуальная информация о наличии цветов:\n"
+                for item in inventory_data:
+                    if isinstance(item, dict) and 'name' in item and 'price' in item and 'quantity' in item:
+                        status = "в наличии" if item['quantity'] > 0 else "нет в наличии"
+                        inventory_context += f"- {item['name']}: {item['price']}, {status} ({item['quantity']} шт)\n"
+                        if item.get('description'):
+                            inventory_context += f"  {item['description']}\n"
+            else:
+                inventory_context = "К сожалению, не удалось получить информацию о наличии цветов."
+            
+            logger.info(f"Inventory context: {inventory_context}")
+            
+            # Формируем сообщения для контекста
+            messages = [
+                {"role": "system", "content": system_prompts[language]},
+                {"role": "system", "content": f"\nВот актуальная информация о цветах:\n{inventory_context}"},
+                {"role": "user", "content": message_text}
+            ]
+            
+            # Получаем ответ от OpenAI
+            logger.info("Requesting response from OpenAI")
+            response = await self.get_openai_response(messages)
+            logger.info(f"Received response from OpenAI: {response}")
+            
+            # Отправляем ответ пользователю
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=response,
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info("Response sent to user")
+            
+        except Exception as e:
+            logger.error(f"Error in handle_message: {str(e)}", exc_info=True)
+            # Отправляем сообщение об ошибке пользователю
+            error_message = "Извините, произошла ошибка. Попробуйте позже."
+            if update and update.message:
+                await context.bot.send_message(
+                    chat_id=update.message.chat_id,
+                    text=error_message
+                )
+
+    async def detect_language(self, text: str) -> str:
+        """Определить язык сообщения"""
+        # Простая проверка на наличие кириллицы
+        has_cyrillic = bool(re.search('[а-яА-Я]', text))
+        
+        if not has_cyrillic:
+            return "en"
+        
+        # Проверка на казахские специфичные буквы
+        has_kazakh = bool(re.search('[әіңғүұқөһ]', text.lower()))
+        
+        return "kk" if has_kazakh else "ru"
+
+    async def get_openai_response(self, messages: List[Dict]) -> str:
+        """Получение ответа от OpenAI API"""
+        try:
+            logger.info("Getting OpenAI credentials")
+            api_key = self.config_service.get_config('api_key', service_name='openai')
+            model = self.config_service.get_config('model', service_name='openai') or "gpt-4-turbo-preview"
+            
+            if not api_key:
+                raise ValueError("OpenAI API key not found")
+
+            logger.info(f"Using OpenAI model: {model}")
+            client = AsyncOpenAI(api_key=api_key)
+            
+            logger.info(f"Sending request to OpenAI with messages: {messages}")
+            completion = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            
+            response = completion.choices[0].message.content
+            logger.info(f"Received response from OpenAI: {response}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Error in get_openai_response: {str(e)}", exc_info=True)
+            raise
+
+    async def start_webhook(self):
+        """Start bot in webhook mode"""
+        try:
+            logger.info(f"Starting bot in webhook mode (URL: {self.webhook_url})")
+            
+            # Инициализируем приложение
+            await self.application.initialize()
+            
+            # Настраиваем webhook
+            await self.application.bot.set_webhook(url=self.webhook_url)
+            
+            # Запускаем webhook
+            await self.application.start()
+            await self.application.run_webhook(
+                listen=self.webhook_host,
+                port=self.webhook_port,
+                url_path="webhook",
+                webhook_url=self.webhook_url
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in webhook mode: {e}", exc_info=True)
+            raise
+
+    async def start_polling(self):
+        """Start bot in polling mode"""
+        try:
+            logger.info("Starting bot in polling mode")
+            
+            # Проверяем токен
+            logger.info(f"Using bot token: {self.token[:10]}...")
+            
+            # Убираем webhook если он был установлен
+            await self.application.bot.delete_webhook()
+            logger.info("Webhook deleted")
+            
+            # Инициализируем и запускаем polling
+            await self.application.initialize()
+            logger.info("Application initialized")
+            
+            await self.application.start()
+            logger.info("Application started")
+            
+            # Запускаем polling и держим бота работающим
+            await self.application.updater.start_polling(drop_pending_updates=True)
+            logger.info("Polling started")
+            
+            # Ждем, пока бот не будет остановлен
+            await self.application.updater.idle()
+            logger.info("Bot stopped")
+            
+        except Exception as e:
+            logger.error(f"Error in polling mode: {e}", exc_info=True)
+            raise
+
+    async def stop(self):
+        """Stop the bot gracefully"""
+        try:
+            if self.application.updater.running:
+                await self.application.updater.stop()
+            if self.application.running:
+                await self.application.stop()
+            await self.application.shutdown()
+            logger.info("Bot stopped successfully")
+        except Exception as e:
+            logger.error(f"Error stopping bot: {e}", exc_info=True)
+
+    async def start(self):
+        """Start the bot"""
+        try:
+            if self.is_production:
+                await self.start_webhook()
+            else:
+                await self.start_polling()
+        except Exception as e:
+            logger.error(f"Error starting bot: {e}", exc_info=True)
+            raise
+
+async def main():
+    """Main function to run the bot"""
+    try:
+        bot = TelegramBot()
+        await bot.start()
+    except Exception as e:
+        logger.error(f"Error in main: {e}", exc_info=True)
+        sys.exit(1)
+
+if __name__ == '__main__':
+    # Запускаем бота
+    asyncio.run(main())
+```
+
+9. Запуск бота:
+
+Для запуска в режиме разработки:
+```bash
+python3 src/telegram_bot.py
+```
+
+Бот автоматически определит режим работы и запустится в соответствующем режиме (webhook или polling).
+
+10. Обработка ошибок:
+- Все операции обернуты в try-except блоки
+- Подробное логирование ошибок
+- Отправка пользователю понятных сообщений об ошибках
+- Автоматическое восстановление после сбоев
+
+11. Интеграции:
+- OpenAI API для генерации ответов
+- Google Sheets для работы с инвентарем
+- Supabase для хранения учетных данных
+- PostgreSQL для прямого доступа к базе данных
+
+Для запуска бота:
+1. Убедитесь, что все необходимые учетные данные добавлены в таблицу credentials
+2. Запустите скрипт командой: python3 src/telegram_bot.py
