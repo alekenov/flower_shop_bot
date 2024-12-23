@@ -111,7 +111,8 @@ class DialogueManager:
                 'role': role,
                 'content': content,
                 'type': message_type,
-                'timestamp': datetime.now().timestamp()
+                'timestamp': datetime.now().timestamp(),
+                'created_at': datetime.now().isoformat()
             }
             
             self.conversations[user_id].append(message)
@@ -139,9 +140,16 @@ class DialogueManager:
                     key=lambda x: self._calculate_message_importance(x),
                     reverse=True
                 )
-                return messages[:max_messages]
+                context = messages[:max_messages]
+            else:
+                context = self.conversations[user_id]
             
-            return self.conversations[user_id]
+            # Преобразуем timestamp в строку ISO формата для JSON сериализации
+            for message in context:
+                if 'timestamp' in message:
+                    message['timestamp'] = datetime.fromtimestamp(message['timestamp']).isoformat()
+            
+            return context
             
         except Exception as e:
             logger.error(f"Error getting context: {e}")
@@ -151,29 +159,29 @@ class DialogueManager:
                                  max_messages: int = 5) -> List[Dict]:
         """Получает релевантный контекст на основе текущего сообщения."""
         try:
-            all_context = await self.get_context(user_id)
-            if not all_context:
+            if user_id not in self.conversations:
                 return []
-                
-            # Определяем тип текущего сообщения
+            
             current_type = self._determine_message_type(current_message)
             
-            # Фильтруем и сортируем контекст
-            relevant_context = []
-            for msg in all_context:
-                relevance_score = self._calculate_relevance(
-                    current_message,
-                    current_type,
-                    msg
-                )
-                if relevance_score > 0:
-                    relevant_context.append((msg, relevance_score))
+            # Получаем все сообщения и вычисляем их релевантность
+            relevant_messages = []
+            for msg in self.conversations[user_id]:
+                relevance = self._calculate_relevance(current_message, current_type, msg)
+                relevant_messages.append((msg, relevance))
             
             # Сортируем по релевантности
-            relevant_context.sort(key=lambda x: x[1], reverse=True)
+            relevant_messages.sort(key=lambda x: x[1], reverse=True)
             
-            # Возвращаем самые релевантные сообщения
-            return [msg for msg, _ in relevant_context[:max_messages]]
+            # Берем только самые релевантные сообщения
+            context = [msg for msg, _ in relevant_messages[:max_messages]]
+            
+            # Преобразуем timestamp в строку ISO формата для JSON сериализации
+            for message in context:
+                if 'timestamp' in message:
+                    message['timestamp'] = datetime.fromtimestamp(message['timestamp']).isoformat()
+            
+            return context
             
         except Exception as e:
             logger.error(f"Error getting relevant context: {e}")
