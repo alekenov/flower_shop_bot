@@ -765,6 +765,17 @@ class DocsService:
                                 return line.split(':', 1)[1].strip()
                         return content
 
+            # WhatsApp
+            if any(word in query for word in ['уатсап', 'ватсап', 'whatsapp', 'вацап', 'what', 'app', 'вотсап']):
+                for section, content in self.sections.items():
+                    if '## 1. Основная информация' in section:
+                        # Извлекаем только часть про WhatsApp
+                        lines = content.split('\n')
+                        for i, line in enumerate(lines):
+                            if 'whatsapp:' in line.lower():
+                                return line.split(':', 1)[1].strip()
+                        return content
+
             # Ищем во всех разделах
             for section, content in self.sections.items():
                 score = 0
