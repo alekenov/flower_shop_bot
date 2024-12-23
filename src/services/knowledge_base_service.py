@@ -4,7 +4,7 @@ from typing import Dict, List, Set, Tuple
 from datetime import datetime
 from collections import defaultdict
 import asyncio
-from src.services.docs_service import DocsService
+from services.docs_service import DocsService
 
 logger = logging.getLogger(__name__)
 

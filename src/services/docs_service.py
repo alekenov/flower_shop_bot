@@ -9,6 +9,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import psycopg2
 from psycopg2.extras import DictCursor
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +38,9 @@ class DocsService:
             )
             conn.autocommit = True
 
-            # Получаем учетные данные Google
+            # Получаем учетные данные Google и ID документа
             with conn.cursor(cursor_factory=DictCursor) as cur:
+                # Получаем service account
                 cur.execute(
                     """
                     SELECT credential_value 
@@ -46,31 +48,77 @@ class DocsService:
                     WHERE service_name = 'google' AND credential_key = 'service_account'
                     """
                 )
-                result = cur.fetchone()
-                if not result:
-                    raise ValueError("Google service account credentials not found")
-                credentials_info = json.loads(result['credential_value'])
+                service_account_result = cur.fetchone()
+                
+                # Получаем ID документа
+                cur.execute(
+                    """
+                    SELECT credential_value 
+                    FROM credentials 
+                    WHERE service_name = 'google' AND credential_key = 'docs_knowledge_base_id'
+                    """
+                )
+                doc_id_result = cur.fetchone()
+                
+            if not service_account_result or not doc_id_result:
+                raise Exception("Не найдены учетные данные Google или ID документа")
 
-            # Используем константу вместо запроса к БД
-            self.knowledge_base_doc_id = KNOWLEDGE_BASE_DOC_ID
-
-            # Создаем сервис Google Docs
-            credentials = service_account.Credentials.from_service_account_info(
-                credentials_info,
-                scopes=[
-                    'https://www.googleapis.com/auth/documents',
-                    'https://www.googleapis.com/auth/drive.file'
-                ]
+            # Загружаем service account
+            service_account_info = json.loads(service_account_result[0])
+            self.credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/documents.readonly']
             )
-            self.service = build('docs', 'v1', credentials=credentials)
-            logger.info("Successfully initialized Google Docs service")
+            
+            # Сохраняем ID документа
+            self.knowledge_base_doc_id = doc_id_result[0]
+            
+            # Создаем сервис
+            self.service = build('docs', 'v1', credentials=self.credentials)
+            
+            # Загружаем документ при инициализации
+            self.sections = {}
+            self._load_document()
             
         except Exception as e:
             logger.error(f"Failed to initialize Google Docs service: {e}")
             raise
-        finally:
-            if 'conn' in locals():
-                conn.close()
+
+    def _load_document(self):
+        """Загружает и индексирует документ."""
+        try:
+            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
+            content = doc.get('body', {}).get('content', [])
+            
+            if not content:
+                logger.error("Не удалось получить содержимое документа")
+                return
+
+            # Извлекаем текст и разбиваем на секции
+            current_section = None
+            current_content = []
+
+            for element in content:
+                if 'paragraph' in element:
+                    for part in element['paragraph'].get('elements', []):
+                        if text := part.get('textRun', {}).get('content'):
+                            if text.startswith('## '):
+                                if current_section:
+                                    self.sections[current_section] = '\n'.join(current_content)
+                                current_section = text.strip()
+                                current_content = []
+                            else:
+                                current_content.append(text)
+
+            if current_section:
+                self.sections[current_section] = '\n'.join(current_content)
+
+            logger.info(f"Загружено {len(self.sections)} разделов")
+            for section in self.sections:
+                logger.info(f"Раздел: {section}")
+
+        except Exception as e:
+            logger.error(f"Ошибка при загрузке документа: {e}")
 
     async def add_unanswered_question(self, question: str, user_id: int, bot_response: str = None, response_type: str = "Нет ответа"):
         """Добавление нового вопроса в секцию активных вопросов."""
@@ -152,23 +200,36 @@ class DocsService:
         return -1
 
     async def get_knowledge_base(self) -> str:
-        """Получение базы знаний."""
+        """Получает содержимое базы знаний из Google Docs."""
         try:
+            logger.info(f"Получаем документ {self.knowledge_base_doc_id}")
+            
+            # Получаем документ
             doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
             content = doc.get('body', {}).get('content', [])
             
-            full_text = ""
+            if not content:
+                logger.error("Документ пустой")
+                return ""
+                
+            logger.info(f"Получен документ с {len(content)} элементами")
+            
+            # Извлекаем текст
+            full_text = []
             for element in content:
                 if 'paragraph' in element:
                     for part in element['paragraph'].get('elements', []):
-                        text = part.get('textRun', {}).get('content', '')
-                        full_text += text
+                        if text := part.get('textRun', {}).get('content'):
+                            full_text.append(text)
+                            
+            result = ''.join(full_text)
+            logger.info(f"Извлечено {len(result)} символов текста")
             
-            return full_text
+            return result
             
         except Exception as e:
             logger.error(f"Failed to get knowledge base: {e}")
-            raise
+            return ""
 
     async def create_initial_structure(self):
         """Создание начальной структуры документа базы знаний."""
@@ -332,64 +393,53 @@ class DocsService:
             logger.error(f"Failed to create initial structure: {e}")
             raise
 
-    async def get_section_content(self, section_title: str) -> str:
-        """Получение содержимого конкретного раздела."""
+    async def get_section_content(self, topic: str) -> Optional[str]:
+        """Получает содержимое конкретного раздела"""
         try:
-            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
-            content = doc.get('body', {}).get('content', [])
+            # Маппинг тем на заголовки разделов
+            topic_headers = {
+                'адрес': '## 1. Основная информация',
+                'время': '## 1. Основная информация',
+                'контакты': '## 1. Основная информация',
+                'акции': '## 2. Текущие акции',
+                'программа': '## 3. Программа лояльности',
+                'корпоративным': '## 4. Корпоративным клиентам',
+                'вопросы': '## 6. FAQ'
+            }
             
-            section_start = self._find_section_index(doc, section_title)
-            if section_start == -1:
-                logger.error(f"Section {section_title} not found")
-                return ""
+            logger.info(f"Ищем раздел для темы: {topic}")
             
-            next_section_start = -1
-            full_text = ""
-            current_index = 1
+            if topic not in topic_headers:
+                logger.warning(f"Тема '{topic}' не найдена в маппинге")
+                return None
+                
+            # Возвращаем нужную секцию
+            header = topic_headers[topic]
+            section_content = self.sections.get(header)
             
-            # Ищем следующий заголовок того же или более высокого уровня
-            for element in content:
-                if 'paragraph' in element:
-                    for part in element['paragraph'].get('elements', []):
-                        text = part.get('textRun', {}).get('content', '')
-                        if current_index > section_start and text.strip().startswith('#'):
-                            next_section_start = current_index
-                            break
-                        current_index += len(text)
-            
-            # Получаем текст раздела
-            current_index = 1
-            is_in_section = False
-            for element in content:
-                if 'paragraph' in element:
-                    for part in element['paragraph'].get('elements', []):
-                        text = part.get('textRun', {}).get('content', '')
-                        if current_index == section_start:
-                            is_in_section = True
-                        if next_section_start != -1 and current_index >= next_section_start:
-                            is_in_section = False
-                        if is_in_section:
-                            full_text += text
-                        current_index += len(text)
-            
-            return full_text.strip()
+            if section_content:
+                logger.info(f"Найден контент для раздела '{header}' ({len(section_content)} символов)")
+            else:
+                logger.warning(f"Не найден контент для раздела '{header}'")
+                
+            return section_content
             
         except Exception as e:
-            logger.error(f"Failed to get section content: {e}")
-            raise
+            logger.error(f"Error getting section content: {e}")
+            return None
 
     async def update_section(self, section_title: str, new_content: str):
         """Обновление содержимого раздела."""
         try:
-            doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
-            section_start = self._find_section_index(doc, section_title)
+            # Находим индекс раздела
+            section_index = self._find_section_index(self.service.documents().get(documentId=self.knowledge_base_doc_id).execute(), section_title)
             
-            if section_start == -1:
+            if section_index == -1:
                 logger.error(f"Section {section_title} not found")
                 return
             
             # Находим конец раздела
-            content = doc.get('body', {}).get('content', [])
+            content = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute().get('body', {}).get('content', [])
             next_section_start = -1
             current_index = 1
             
@@ -397,7 +447,7 @@ class DocsService:
                 if 'paragraph' in element:
                     for part in element['paragraph'].get('elements', []):
                         text = part.get('textRun', {}).get('content', '')
-                        if current_index > section_start and text.strip().startswith('#'):
+                        if current_index > section_index and text.strip().startswith('#'):
                             next_section_start = current_index
                             break
                         current_index += len(text)
@@ -410,7 +460,7 @@ class DocsService:
                 requests.append({
                     'deleteContentRange': {
                         'range': {
-                            'startIndex': section_start + len(section_title) + 1,
+                            'startIndex': section_index + len(section_title) + 1,
                             'endIndex': next_section_start
                         }
                     }
@@ -420,7 +470,7 @@ class DocsService:
             requests.append({
                 'insertText': {
                     'location': {
-                        'index': section_start + len(section_title) + 1
+                        'index': section_index + len(section_title) + 1
                     },
                     'text': f"\n{new_content}\n"
                 }
@@ -586,32 +636,16 @@ class DocsService:
             
             # Словарь категорий и связанных слов
             categories = {
-                "акции": {
-                    "keywords": ["акция", "акции", "скидка", "скидки", "предложение", "специальное", "текущие", "действуют"],
-                    "related": ["бесплатно", "процент", "выгода", "дешевле", "новый", "клиент", "первый"]
-                },
-                "программа_лояльности": {
-                    "keywords": ["программа", "лояльность", "баллы", "бонусы", "накопить", "накопление", "программе"],
-                    "related": ["скидка", "vip", "клиент", "постоянный", "использовать", "потратить"]
-                },
-                "корпоративные": {
-                    "keywords": ["корпоратив", "компания", "фирма", "бизнес", "юридическое", "корпоративный"],
-                    "related": ["документы", "отсрочка", "безнал", "счет", "договор", "менеджер"]
-                },
                 "контакты": {
-                    "keywords": ["контакт", "связь", "позвонить", "написать", "адрес", "контакты"],
-                    "related": ["телефон", "whatsapp", "адрес", "instagram", "почта"]
+                    "keywords": ["контакт", "связь", "позвонить", "написать", "адрес", "контакты", "где", "найти", "whatsapp"],
+                    "related": ["телефон", "whatsapp", "адрес", "instagram", "почта", "расположен", "находится"]
                 },
                 "время_работы": {
                     "keywords": ["время", "часы", "работаете", "открыты", "график", "режим"],
                     "related": ["режим", "выходные", "перерыв", "закрыты", "доставка"]
                 },
-                "оплата": {
-                    "keywords": ["оплата", "платить", "оплатить", "деньги", "kaspi", "каспи"],
-                    "related": ["наличные", "перевод", "счет", "карта", "терминал"]
-                },
                 "доставка": {
-                    "keywords": ["доставка", "привезти", "доставить", "привоз", "курьер"],
+                    "keywords": ["доставка", "привезти", "доставить", "привоз", "курьер", "самовывоз"],
                     "related": ["курьер", "самовывоз", "время", "зона", "бесплатно"]
                 }
             }
@@ -675,40 +709,6 @@ class DocsService:
                     # Если категория секции совпадает с категорией запроса
                     if section_category == query_category:
                         relevance_score *= 1.5  # Увеличиваем релевантность на 50%
-                        
-                        # Дополнительные совпадения по ключевым словам (вес 3)
-                        category_keywords = categories[query_category]["keywords"]
-                        keyword_matches = sum(1 for kw in category_keywords if any(kw in text or text in kw for text in section_text.split()))
-                        relevance_score += keyword_matches * 3
-                        
-                        # Связанные слова категории (вес 1)
-                        related_words = categories[query_category]["related"]
-                        related_matches = sum(1 for rw in related_words if any(rw in text or text in rw for text in section_text.split()))
-                        relevance_score += related_matches
-                
-                # 4. Штраф за длинные секции
-                words_count = len(section_text.split())
-                if words_count > 50:  # Если секция длиннее 50 слов
-                    length_penalty = (words_count - 50) / 100
-                    relevance_score = relevance_score / (1 + length_penalty)
-                
-                # 5. Бонус за короткие, но информативные секции
-                if words_count <= 50 and query_matches > 0:
-                    relevance_score *= 1.2
-                
-                # 6. Штраф за слишком общие секции
-                if len(section["path"]) <= 2:  # Если секция находится на верхнем уровне
-                    relevance_score *= 0.8
-                
-                # 7. Бонус за точное совпадение с запросом
-                if any(word.lower() == query.lower() for word in title.split()):
-                    relevance_score *= 1.5
-                
-                # 8. Бонус за релевантный путь
-                path_text = " ".join(section["path"]).lower()
-                path_matches = sum(1 for word in query_words if any(word in text or text in word for text in path_text.split()))
-                if path_matches > 0:
-                    relevance_score *= (1 + path_matches * 0.2)  # Увеличиваем на 20% за каждое совпадение
                 
                 if relevance_score > 2:  # Минимальный порог релевантности
                     relevant_sections.append((section, relevance_score))
@@ -716,57 +716,82 @@ class DocsService:
             # Сортируем секции по релевантности
             relevant_sections.sort(key=lambda x: x[1], reverse=True)
             
-            # Формируем ответ из наиболее релевантных секций
+            # Берем только самую релевантную секцию
             if relevant_sections:
-                # Берем топ-2 наиболее релевантные секции
-                response_sections = []
-                used_content = set()  # Для отслеживания уникального контента
+                section = relevant_sections[0][0]
+                content = section["content"].strip()
+                content = content.replace('#', '').strip()
                 
-                # Выбираем уникальные секции
-                for section, score in relevant_sections:
-                    # Очищаем содержимое от лишних символов
-                    content = section["content"].strip()
-                    content = content.replace('#', '').strip()
-                    
-                    # Очищаем и форматируем каждую строку
-                    clean_lines = []
-                    for line in content.split('\n'):
-                        line = line.strip()
-                        # Пропускаем пустые строки и дубликаты
-                        if line and not any(line in used_line or used_line in line for used_line in used_content):
-                            clean_lines.append(line)
-                            used_content.add(line)
-                    
-                    # Если есть уникальные строки
-                    if clean_lines:
-                        # Очищаем путь от символов форматирования
-                        clean_path = []
-                        for p in section["path"][1:]:  # Пропускаем первый элемент (общий заголовок)
-                            clean_p = p.strip('# ').strip()
-                            if clean_p and not clean_p.startswith('База знаний'):
-                                clean_path.append(clean_p)
-                        
-                        if clean_path:
-                            response_sections.append({
-                                'path': " > ".join(clean_path),
-                                'content': '\n'.join(clean_lines)
-                            })
-                        
-                        if len(response_sections) >= 2:
-                            break
+                # Очищаем и форматируем каждую строку
+                clean_lines = []
+                for line in content.split('\n'):
+                    line = line.strip()
+                    if line:
+                        clean_lines.append(line)
                 
-                # Формируем финальный ответ
-                if response_sections:
-                    response = []
-                    for section in response_sections:
-                        response.append(f"{section['path']}:\n")
-                        response.append(section['content'])
-                    return '\n\n'.join(response).strip()
-                else:
-                    return "Извините, я не нашел релевантной информации по вашему вопросу. Попробуйте переформулировать вопрос или уточнить, что именно вас интересует."
-            else:
-                return "Извините, я не нашел релевантной информации по вашему вопросу. Попробуйте переформулировать вопрос или уточнить, что именно вас интересует."
+                # Очищаем путь от символов форматирования
+                clean_path = []
+                for p in section["path"][1:]:  # Пропускаем первый элемент (общий заголовок)
+                    clean_p = p.strip('# ').strip()
+                    if clean_p and not clean_p.startswith('База знаний'):
+                        clean_path.append(clean_p)
+                
+                if clean_path:
+                    response = f"{' > '.join(clean_path)}:\n\n"
+                    response += '\n'.join(clean_lines)
+                    return response.strip()
+            
+            return "Извините, я не нашел релевантной информации по вашему вопросу. Попробуйте переформулировать вопрос или уточните, что именно вас интересует."
             
         except Exception as e:
             logger.error(f"Error getting relevant knowledge: {e}")
             return "Произошла ошибка при поиске информации"
+
+    def find_relevant_section(self, query: str) -> Optional[str]:
+        """Находит релевантный раздел для запроса."""
+        try:
+            query = query.lower()
+            best_match = None
+            best_score = 0
+
+            # Специальные случаи
+            if any(word in query for word in ['адрес', 'где', 'находитесь', 'расположен']):
+                for section, content in self.sections.items():
+                    if '## 1. Основная информация' in section:
+                        # Извлекаем только часть про адрес
+                        lines = content.split('\n')
+                        for i, line in enumerate(lines):
+                            if 'адрес:' in line.lower():
+                                return line.split(':', 1)[1].strip()
+                        return content
+
+            # Ищем во всех разделах
+            for section, content in self.sections.items():
+                score = 0
+                
+                # Проверяем заголовок
+                section_lower = section.lower()
+                for word in query.split():
+                    if word in section_lower:
+                        score += 2
+                
+                # Проверяем содержимое
+                content_lower = content.lower()
+                for word in query.split():
+                    if word in content_lower:
+                        score += 1
+                
+                if score > best_score:
+                    best_score = score
+                    best_match = content
+
+            if best_score > 0:
+                logger.info(f"Найден релевантный раздел (score: {best_score})")
+                return best_match
+            
+            logger.info("Не найден релевантный раздел")
+            return None
+
+        except Exception as e:
+            logger.error(f"Ошибка при поиске релевантного раздела: {e}")
+            return None

@@ -239,6 +239,31 @@ class SupabaseService:
             (user_id, limit)
         ) or []
 
+    def get_credential(self, service_name: str, credential_key: str) -> Optional[str]:
+        """
+        Получение учетных данных из таблицы credentials
+        
+        Args:
+            service_name: Название сервиса (например, 'telegram', 'openai')
+            credential_key: Ключ учетных данных (например, 'api_key', 'bot_token')
+            
+        Returns:
+            Значение учетных данных или None
+        """
+        try:
+            result = self.execute_query_single(
+                """
+                SELECT credential_value
+                FROM credentials
+                WHERE service_name = %s AND credential_key = %s
+                """,
+                (service_name, credential_key)
+            )
+            return result['credential_value'] if result else None
+        except Exception as e:
+            logger.error(f"Failed to get credential: {str(e)}")
+            return None
+
     def __del__(self):
         """Закрытие соединения при удалении объекта"""
         try:

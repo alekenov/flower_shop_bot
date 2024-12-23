@@ -1,27 +1,31 @@
 import os
 import json
 import logging
+import time
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from services.config_service import config_service
+from utils.logger_config import get_logger
+from typing import List, Optional
 
-logger = logging.getLogger(__name__)
+# Setup logging
+logger = get_logger('sheets_service', logging.DEBUG)
 
 class SheetsService:
     def __init__(self):
         """Initialize the Google Sheets service."""
         try:
-            self.spreadsheet_id = config_service.get_config('GOOGLE_SHEETS_SPREADSHEET_ID')
+            self.spreadsheet_id = config_service.get_config('sheets_spreadsheet_id', service_name='google')
             if not self.spreadsheet_id:
                 raise ValueError("Google Sheets spreadsheet ID not found in config")
             
             logger.info(f"Initializing Google Sheets service with spreadsheet ID: {self.spreadsheet_id}")
             
             # Load credentials from service account JSON
-            service_account_info = json.loads(config_service.get_config('GOOGLE_SERVICE_ACCOUNT'))
+            service_account_info = json.loads(config_service.get_config('service_account', service_name='google'))
             if not service_account_info:
                 raise ValueError("Google service account credentials not found in config")
                 
@@ -41,6 +45,11 @@ class SheetsService:
             
             sheet_names = self._get_sheet_names()
             logger.info(f"Available sheets: {sheet_names}")
+            
+            # Кэш данных
+            self._cache = {}
+            self._cache_time = None
+            self._cache_ttl = 60  # Время жизни кэша в секундах
             
         except Exception as e:
             logger.error(f"Failed to initialize Google Sheets service: {str(e)}", exc_info=True)
@@ -70,24 +79,7 @@ class SheetsService:
     def get_inventory_data(self):
         """Get inventory data from Google Sheets."""
         try:
-            possible_ranges = ['Catalog!A2:E', 'Sheet1!A2:E', 'Лист1!A2:E', 'Каталог!A2:E']
-            values = []
-            
-            for sheet_range in possible_ranges:
-                try:
-                    logger.info(f"Trying to read from range: {sheet_range}")
-                    result = self.service.spreadsheets().values().get(
-                        spreadsheetId=self.spreadsheet_id,
-                        range=sheet_range
-                    ).execute()
-                    values = result.get('values', [])
-                    if values:
-                        logger.info(f"Successfully read data from {sheet_range}")
-                        break
-                except Exception as e:
-                    logger.warning(f"Could not read from {sheet_range}: {e}")
-                    continue
-            
+            values = self._get_cached_data('Sheet1!A2:E')
             logger.info(f"Retrieved {len(values)} rows from spreadsheet")
             
             if not values:
@@ -95,69 +87,16 @@ class SheetsService:
                 return []
             
             inventory = []
-            for i, row in enumerate(values, start=2):
-                try:
-                    # Убедимся, что у нас есть все необходимые колонки
-                    while len(row) < 4:
-                        row.append('')  # Добавляем пустые значения если не хватает колонок
-                    
-                    # Очищаем и проверяем значения
-                    name = row[0].strip() if row[0] else ''
-                    price = row[1].strip() if len(row) > 1 else ''
-                    quantity = row[2].strip() if len(row) > 2 else ''
-                    description = row[3].strip() if len(row) > 3 else ''
-                    
-                    # Проверяем обязательные поля
-                    if not name:
-                        logger.warning(f"Пропускаем строку {i}: отсутствует название")
-                        continue
-                    
-                    # Преобразуем price в число
-                    try:
-                        price_clean = ''.join(c for c in price if c.isdigit() or c == '.')
-                        if price_clean:
-                            price_value = float(price_clean)
-                            if price_value <= 0:
-                                logger.warning(f"Пропускаем строку {i}: некорректная цена {price}")
-                                continue
-                            price = f"{int(price_value)} тенге"
-                        else:
-                            logger.warning(f"Пропускаем строку {i}: отсутствует цена")
-                            continue
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Пропускаем строку {i}: ошибка при обработке цены {price}: {e}")
-                        continue
-                    
-                    # Преобразуем quantity в число
-                    try:
-                        quantity = int(quantity) if quantity.isdigit() else 0
-                        if quantity < 0:
-                            logger.warning(f"Корректируем отрицательное количество в строке {i}")
-                            quantity = 0
-                    except (ValueError, TypeError) as e:
-                        logger.warning(f"Ошибка при обработке количества в строке {i}: {e}")
-                        quantity = 0
-                    
-                    item = {
-                        'name': name,
-                        'price': price,
-                        'quantity': quantity,
-                        'description': description
-                    }
-                    
-                    logger.info(f"Обработана строка {i}: {item}")
-                    inventory.append(item)
-                    
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке строки {i}: {e}", exc_info=True)
-                    logger.error(f"Проблемная строка: {row}")
-                    continue
+            for row in values:
+                if len(row) >= 2 and row[0].strip() and row[1].strip():
+                    name = row[0].strip()
+                    price = row[1].strip()
+                    inventory.append(f"{name} - {price}")
             
-            logger.info(f"Успешно обработано {len(inventory)} товаров")
             return inventory
             
         except Exception as e:
-            logger.error(f"Ошибка при получении данных: {str(e)}", exc_info=True)
+            logger.error(f"Error getting inventory data: {e}")
             return []
 
     def format_inventory_for_openai(self, inventory):
@@ -434,6 +373,62 @@ class SheetsService:
             
         except Exception as e:
             logger.error(f"Failed to get inventory item: {str(e)}", exc_info=True)
+            return None
+
+    def _get_cached_data(self, range_name: str):
+        """Получить данные из кэша или обновить его."""
+        current_time = time.time()
+        
+        # Проверяем актуальность кэша
+        if (self._cache_time is None or 
+            current_time - self._cache_time > self._cache_ttl or 
+            range_name not in self._cache):
+            
+            logger.info(f"Cache miss for {range_name}, fetching from sheets")
+            result = self.service.spreadsheets().values().get(
+                spreadsheetId=self.spreadsheet_id,
+                range=range_name
+            ).execute()
+            
+            self._cache[range_name] = result.get('values', [])
+            self._cache_time = current_time
+            return self._cache[range_name]
+        
+        logger.info(f"Cache hit for {range_name}")
+        return self._cache[range_name]
+
+    def get_specific_flowers(self, flower_types: List[str]) -> Optional[str]:
+        """Get information about specific flowers."""
+        try:
+            if not flower_types:
+                return None
+
+            # Получаем данные из кэша
+            values = self._get_cached_data('Sheet1!A2:E')
+            if not values:
+                logger.warning("No data found in spreadsheet")
+                return None
+
+            # Если запрошены все цветы
+            if 'все' in flower_types:
+                result = []
+                for row in values:
+                    if len(row) >= 2 and row[0].strip() and row[1].strip():
+                        result.append(f"{row[0].strip()} - {row[1].strip()} тг")
+                return "\n".join(result) if result else None
+
+            # Если запрошены конкретные цветы
+            result = []
+            for row in values:
+                if len(row) >= 2 and row[0].strip() and row[1].strip():
+                    name = row[0].strip().lower()
+                    if any(flower.lower() in name for flower in flower_types):
+                        result.append(f"{row[0].strip()} - {row[1].strip()} тг")
+            
+            return "\n".join(result) if result else None
+
+        except Exception as e:
+            logger.error(f"Error getting specific flowers: {e}")
             return None
 
     async def initialize_catalog_sheet(self):
