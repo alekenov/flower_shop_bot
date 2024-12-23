@@ -6,6 +6,7 @@ import os
 import fcntl
 import time
 from typing import Optional
+from aiohttp import web
 
 from telegram import Update
 from telegram.ext import (
@@ -55,9 +56,7 @@ class SingleInstanceBot:
             self.lockfd.flush()
             return True
         except (IOError, OSError) as e:
-            logger.error(f"Failed to acquire lock: {e}")
-            if self.lockfd:
-                self.lockfd.close()
+            logger.error(f"Could not acquire lock: {e}")
             return False
 
     def release(self):
@@ -81,63 +80,45 @@ class TelegramBot:
         self.token: Optional[str] = None
         self.application: Optional[Application] = None
         self.lock = SingleInstanceBot()
+        
+    async def health_check(self, request):
+        """Health check endpoint"""
+        return web.Response(text='OK', status=200)
+        
+    async def webhook_handler(self, request):
+        """Handle incoming webhook requests"""
+        try:
+            update = Update.de_json(await request.json(), self.application.bot)
+            await self.application.process_update(update)
+            return web.Response(status=200)
+        except Exception as e:
+            logger.error(f"Error processing update: {e}")
+            return web.Response(status=500)
 
     async def get_bot_token(self):
         """Get bot token from database"""
         try:
-            self.token = self.config.get_config('bot_token', service_name='telegram')
+            self.token = await self.config.get_config_async('TELEGRAM_BOT_TOKEN_PROD')
             if not self.token:
-                raise ValueError("Telegram bot token not found in database")
+                raise ValueError("Bot token not found in database")
         except Exception as e:
             logger.error(f"Failed to get bot token: {e}")
-            raise
+            sys.exit(1)
 
-    async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
-        welcome_message = (
-            "Привет! Я помощник цветочного магазина. "
-            "Вы можете спросить меня о:\n"
-            "- Наличии и ценах на цветы\n"
-            "- Условиях доставки и самовывоза\n"
-            "- Адресе и режиме работы\n"
-            "Чем могу помочь?"
-        )
-        await update.message.reply_text(welcome_message)
+        user = update.effective_user
+        await update.message.reply_text(f'Здравствуйте, {user.first_name}! Я помогу вам с заказом цветов.')
 
-    async def get_chat_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Get chat ID"""
-        await update.message.reply_text(f"Chat ID: {update.effective_chat.id}")
-
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle incoming messages"""
         try:
-            user_message = update.message.text.lower()
-            user_id = update.effective_user.id
-            logger.info(f"Получено сообщение от пользователя {user_id}: {user_message}")
-            
-            try:
-                # Получаем ответ от OpenAI
-                response = await self.openai.get_response(
-                    user_message=user_message,
-                    user_id=user_id
-                )
-                
-                if not response:
-                    response = "Извините, я не смог обработать ваш запрос. Попробуйте переформулировать вопрос."
-                    
-            except Exception as e:
-                logger.error(f"Ошибка при обработке сообщения: {str(e)}")
-                response = "Извините, произошла ошибка при обработке вашего сообщения. Попробуйте позже."
-
-            logger.info(f"Отправляем ответ: {response}")
+            user_message = update.message.text
+            response = await self.openai.get_response(user_message)
             await update.message.reply_text(response)
-            
         except Exception as e:
-            logger.error(f"Error in handle_message: {str(e)}", exc_info=True)
-            await update.message.reply_text(
-                "Извините, произошла ошибка при обработке вашего сообщения. "
-                "Пожалуйста, попробуйте позже."
-            )
+            logger.error(f"Error handling message: {e}")
+            await update.message.reply_text("Извините, произошла ошибка. Попробуйте позже.")
 
     def signal_handler(self, signum, frame):
         """Handle termination signals"""
@@ -145,58 +126,62 @@ class TelegramBot:
         self.lock.release()
         sys.exit(0)
 
+    async def setup_application(self):
+        """Setup bot application"""
+        await self.get_bot_token()
+        self.application = Application.builder().token(self.token).build()
+        
+        # Add handlers
+        self.application.add_handler(CommandHandler("start", self.handle_start))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        
+        # Setup webhook
+        webhook_url = "https://flower-shop-bot-315649427788.europe-west1.run.app/webhook"
+        webhook_secret = await self.config.get_config_async('TELEGRAM_WEBHOOK_SECRET')
+        await self.application.bot.set_webhook(
+            url=webhook_url,
+            secret_token=webhook_secret
+        )
+        
+        # Setup web application
+        app = web.Application()
+        app.router.add_get('/health', self.health_check)
+        app.router.add_post('/webhook', self.webhook_handler)
+        
+        return app
+
     async def run(self):
         """Run the bot"""
+        if not self.lock.acquire():
+            logger.error("Another instance is already running")
+            sys.exit(1)
+
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        signal.signal(signal.SIGINT, self.signal_handler)
+
         try:
-            # Get bot token
-            await self.get_bot_token()
+            app = await self.setup_application()
+            port = int(os.environ.get('PORT', 8000))
+            runner = web.AppRunner(app)
+            await runner.setup()
+            site = web.TCPSite(runner, '0.0.0.0', port)
+            await site.start()
             
-            # Initialize bot
-            self.application = Application.builder().token(self.token).build()
+            logger.info(f"Bot started on port {port}")
             
-            # Add handlers
-            self.application.add_handler(CommandHandler("start", self.handle_start))
-            self.application.add_handler(CommandHandler("chatid", self.get_chat_id))
-            self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-            
-            # Set up signal handlers
-            signal.signal(signal.SIGINT, self.signal_handler)
-            signal.signal(signal.SIGTERM, self.signal_handler)
-            
-            # Acquire lock
-            if not self.lock.acquire():
-                logger.error("Another instance is already running")
-                return
-            
-            logger.info("Starting bot...")
-            await self.application.initialize()
-            await self.application.start()
-            await self.application.updater.start_polling()
-            
-            logger.info("Bot is ready to handle messages")
-            
-            # Keep the bot running
-            stop_signal = asyncio.Event()
-            await stop_signal.wait()
-            
+            # Keep the application running
+            while True:
+                await asyncio.sleep(3600)
+                
         except Exception as e:
             logger.error(f"Error running bot: {e}")
             self.lock.release()
-            raise
+            sys.exit(1)
 
-def main():
+async def main():
     """Main function"""
     bot = TelegramBot()
-    try:
-        asyncio.run(bot.run())
-    except KeyboardInterrupt:
-        logger.info("Bot stopped by user")
-    except Exception as e:
-        logger.error(f"Bot stopped with error: {e}")
-        raise
-    finally:
-        if bot.lock:
-            bot.lock.release()
+    await bot.run()
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())

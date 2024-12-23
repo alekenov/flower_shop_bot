@@ -25,7 +25,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080
+    PORT=8000
 
 WORKDIR /app
 
@@ -49,11 +49,8 @@ RUN useradd -m -u 1000 botuser && \
 USER botuser
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:$PORT/health || exit 1
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD curl -f http://localhost:${PORT}/health || exit 1
 
-# Expose port
-EXPOSE $PORT
-
-# Set entrypoint
-ENTRYPOINT ["python3", "src/telegram_bot.py"]
+# Command to run the application
+CMD exec python3 src/telegram_bot.py

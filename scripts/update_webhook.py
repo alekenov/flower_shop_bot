@@ -26,14 +26,15 @@ def update_webhook():
         if not webhook_secret:
             raise ValueError("Webhook secret not found in database")
             
-        # URL вебхука в Supabase
-        webhook_url = f"https://dkohweivbdwweyvyvcbc.supabase.co/functions/v1/telegram-webhook/{bot_token}"
+        # URL вебхука в Cloud Run
+        webhook_url = "https://flower-shop-bot-315649427788.europe-west1.run.app/webhook"
         
         # Параметры для установки вебхука
         params = {
             'url': webhook_url,
             'secret_token': webhook_secret,
-            'drop_pending_updates': True  # Опционально: пропустить накопившиеся обновления
+            'drop_pending_updates': True,  # Опционально: пропустить накопившиеся обновления
+            'allowed_updates': ['message', 'edited_message', 'callback_query']  # Типы обновлений
         }
         
         # URL для установки вебхука
@@ -54,12 +55,17 @@ def update_webhook():
             info_response.raise_for_status()
             
             webhook_info = info_response.json()
-            logger.info(f"Current webhook info: {webhook_info}")
+            logger.info("\nCurrent webhook info:")
+            logger.info(f"URL: {webhook_info.get('result', {}).get('url')}")
+            logger.info(f"Has custom certificate: {webhook_info.get('result', {}).get('has_custom_certificate')}")
+            logger.info(f"Pending update count: {webhook_info.get('result', {}).get('pending_update_count')}")
+            logger.info(f"Last error: {webhook_info.get('result', {}).get('last_error_message')}")
         else:
-            raise ValueError(f"Failed to set webhook: {result}")
+            logger.error(f"Failed to set webhook: {result}")
+            raise ValueError(f"Telegram API error: {result}")
             
     except Exception as e:
-        logger.error(f"Error updating webhook: {str(e)}")
+        logger.error(f"Error updating webhook: {e}")
         raise
 
 if __name__ == "__main__":
@@ -67,5 +73,5 @@ if __name__ == "__main__":
         update_webhook()
         print("\nWebhook successfully updated!")
     except Exception as e:
-        print(f"\nFailed to update webhook: {str(e)}")
+        print(f"\nError: {e}")
         sys.exit(1)
