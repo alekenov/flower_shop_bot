@@ -85,50 +85,39 @@ class ConfigService:
                 
         return self._credentials_cache[service]
     
-    def get_config(self, key: str, required: bool = False) -> Optional[str]:
+    def get_config(self, key: str, service_name: str = None) -> Optional[str]:
         """
-        Получение значения конфигурации по ключу
+        Получение значения конфигурации по ключу.
         
         Args:
-            key: Ключ конфигурации в формате 'SERVICE_KEY'
-            required: Является ли значение обязательным
+            key (str): Ключ конфигурации
+            service_name (str, optional): Имя сервиса. По умолчанию None.
             
         Returns:
-            Optional[str]: Значение конфигурации
-            
-        Raises:
-            ValueError: Если required=True и значение не найдено
-            ValueError: Если формат ключа неверный
+            Optional[str]: Значение конфигурации или None, если не найдено
         """
         try:
-            # Разбираем ключ на сервис и ключ учетных данных
-            parts = key.lower().split('_', 1)
-            if len(parts) != 2:
-                msg = f"Invalid config key format: {key}. Expected format: 'SERVICE_KEY'"
-                if required:
-                    raise ValueError(msg)
-                logger.error(msg)
+            logger.info(f"Getting config for key: {key}, service: {service_name}")
+            
+            if not service_name:
+                logger.warning(f"Service name not provided for key {key}")
                 return None
-                
-            service_name, credential_key = parts
             
-            # Получаем значение из кэша
-            creds = self._get_service_credentials(service_name)
-            value = creds.get(credential_key)
+            # Получаем учетные данные сервиса
+            credentials = self._get_service_credentials(service_name)
+            logger.info(f"Retrieved credentials for service {service_name}: {list(credentials.keys())}")
             
+            # Возвращаем значение по ключу
+            value = credentials.get(key)
             if value is None:
-                msg = f"Config value not found for key: {key}"
-                if required:
-                    raise ValueError(msg)
-                logger.warning(msg)
+                logger.warning(f"No value found for key {key} in service {service_name}")
+            else:
+                logger.info(f"Successfully retrieved value for key {key}")
             
             return value
             
         except Exception as e:
-            msg = f"Error getting config for key {key}: {str(e)}"
-            if required:
-                raise ValueError(msg)
-            logger.error(msg)
+            logger.error(f"Error getting config for key {key}: {str(e)}", exc_info=True)
             return None
     
     def set_config(self, key: str, value: str, description: Optional[str] = None) -> bool:
