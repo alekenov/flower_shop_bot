@@ -120,6 +120,15 @@ class ConfigService:
             logger.error(f"Error getting config for key {key}: {str(e)}", exc_info=True)
             return None
     
+    async def get_config_async(self, key, service=None):
+        """Get config value asynchronously"""
+        try:
+            value = self.get_config(key, service)
+            return value
+        except Exception as e:
+            logger.error(f"Failed to get config value: {e}")
+            raise
+    
     def set_config(self, key: str, value: str, description: Optional[str] = None) -> bool:
         """
         Установка значения конфигурации
