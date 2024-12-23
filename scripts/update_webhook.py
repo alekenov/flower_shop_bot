@@ -17,7 +17,7 @@ def update_webhook():
     """Обновить URL вебхука в Telegram"""
     try:
         # Получаем токен бота
-        bot_token = config_service.get_config('TELEGRAM_BOT_TOKEN_PROD')
+        bot_token = config_service.get_config('TELEGRAM_BOT_TOKEN_DEV')
         if not bot_token:
             raise ValueError("Bot token not found in database")
             

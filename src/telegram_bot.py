@@ -98,7 +98,7 @@ class TelegramBot:
     async def get_bot_token(self):
         """Get bot token from database"""
         try:
-            self.token = await self.config.get_config_async('TELEGRAM_BOT_TOKEN_PROD')
+            self.token = await self.config.get_config_async('TELEGRAM_BOT_TOKEN_DEV')
             if not self.token:
                 raise ValueError("Bot token not found in database")
         except Exception as e:
