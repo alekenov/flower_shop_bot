@@ -3,6 +3,9 @@ from typing import Optional, Dict, Any
 import psycopg2
 from psycopg2.extras import DictCursor
 import os
+import json
+from google.oauth2 import service_account
+from services.postgres_service import PostgresService
 
 logger = logging.getLogger(__name__)
 
@@ -15,38 +18,51 @@ SUPABASE_CONFIG = {
     'database': 'postgres'
 }
 
+DB_CONFIG = {
+    'user': 'postgres.dkohweivbdwweyvyvcbc',
+    'password': 'vigkif-nesJy2-kivraq',
+    'host': 'aws-0-eu-central-1.pooler.supabase.com',
+    'port': '6543',
+    'database': 'postgres'
+}
+
 class ConfigService:
     """
     Сервис для работы с конфигурацией и учетными данными в Supabase.
-    Реализует паттерн Singleton для обеспечения единственного подключения к БД.
-    Использует кэширование для оптимизации производительности.
+    Реализует паттерн Singleton для обеспечения единственного экземпляра.
     """
-    
     _instance = None
     _credentials_cache: Dict[str, Dict[str, str]] = {}
     
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super(ConfigService, cls).__new__(cls)
-            cls._instance._init_connection()
             cls._instance._init_cache()
         return cls._instance
     
-    def _init_connection(self) -> None:
-        """Инициализация подключения к базе данных"""
+    def __init__(self):
+        """Initialize the config service."""
+        if not hasattr(self, 'initialized'):
+            self.db = PostgresService()
+            self.conn = None
+            self.connect()
+            self.initialized = True
+    
+    def connect(self):
+        """Connect to the database."""
         try:
-            # Подключаемся к базе данных используя прямые параметры
-            self.conn = psycopg2.connect(
-                host=SUPABASE_CONFIG['host'],
-                port=SUPABASE_CONFIG['port'],
-                user=SUPABASE_CONFIG['user'],
-                password=SUPABASE_CONFIG['password'],
-                database=SUPABASE_CONFIG['database']
-            )
-            self.conn.autocommit = True
-            logger.info("Successfully connected to database")
+            if not self.conn or self.conn.closed:
+                self.conn = psycopg2.connect(
+                    dbname="postgres",
+                    user="postgres.dkohweivbdwweyvyvcbc",
+                    password="vigkif-nesJy2-kivraq",
+                    host="aws-0-eu-central-1.pooler.supabase.com",
+                    port="6543"
+                )
+                self.conn.autocommit = True
+                logger.info("Successfully connected to database")
         except Exception as e:
-            logger.error(f"Failed to connect to database: {str(e)}")
+            logger.error(f"Failed to connect to database: {e}")
             raise
     
     def _init_cache(self) -> None:
@@ -127,6 +143,35 @@ class ConfigService:
             return value
         except Exception as e:
             logger.error(f"Failed to get config value: {e}")
+            raise
+    
+    async def get_google_credentials(self) -> dict:
+        """Получение учетных данных Google"""
+        try:
+            # Получаем service account из базы
+            query = """
+                SELECT credential_value 
+                FROM credentials 
+                WHERE service_name = 'google' 
+                AND credential_key = 'service_account'
+                LIMIT 1
+            """
+            result = await self.db.fetch_one(query)
+            
+            if not result:
+                raise ValueError("Google service account not found in database")
+                
+            service_account_info = json.loads(result['credential_value'])
+            
+            credentials = service_account.Credentials.from_service_account_info(
+                service_account_info,
+                scopes=['https://www.googleapis.com/auth/spreadsheets']
+            )
+            
+            return credentials
+            
+        except Exception as e:
+            logger.error(f"Error getting Google credentials: {e}")
             raise
     
     def set_config(self, key: str, value: str, description: Optional[str] = None) -> bool:

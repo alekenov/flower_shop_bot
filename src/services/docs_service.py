@@ -595,9 +595,17 @@ class DocsService:
             doc = self.service.documents().get(documentId=self.knowledge_base_doc_id).execute()
             content = doc.get('body', {}).get('content', [])
             
-            # Разбиваем документ на секции по заголовкам
+            if not content:
+                return "Извините, база знаний пуста или недоступна"
+            
+            # Разбиваем документ на секции
             sections = []
-            current_section = {"title": "", "content": "", "level": 0, "path": []}
+            current_section = {
+                "title": "Начало документа",
+                "content": "",
+                "level": 0,
+                "path": ["База знаний"]
+            }
             section_path = []
             
             for element in content:
@@ -629,7 +637,7 @@ class DocsService:
                         }
                     else:
                         current_section["content"] += text
-            
+
             # Добавляем последнюю секцию
             if current_section["content"]:
                 sections.append(current_section)
@@ -686,18 +694,17 @@ class DocsService:
                 relevance_score = 0
                 
                 # 1. Прямые совпадения слов запроса (вес 4)
-                query_matches = sum(1 for word in query_words if any(word in text or text in word for text in section_text.split()))
-                relevance_score += query_matches * 4
+                query_matches = sum(4 for word in query_words if word in section_text)
+                relevance_score += query_matches
                 
-                # 2. Совпадения в заголовке имеют больший вес (вес 6)
-                title_matches = sum(1 for word in query_words if any(word in text or text in word for text in title.lower().split()))
-                relevance_score += title_matches * 6
+                # 2. Частичные совпадения (вес 2)
+                partial_matches = sum(2 for word in query_words if any(word in text or text in word for text in section_text.split()))
+                relevance_score += partial_matches
                 
-                # 3. Совпадения по категории
+                # 3. Совпадение категории (если определена)
                 if query_category:
-                    # Проверяем, соответствует ли секция категории запроса
-                    section_category = None
                     max_category_matches = 0
+                    section_category = None
                     
                     for category, words in categories.items():
                         # Считаем совпадения с ключевыми словами категории
@@ -722,13 +729,6 @@ class DocsService:
                 content = section["content"].strip()
                 content = content.replace('#', '').strip()
                 
-                # Очищаем и форматируем каждую строку
-                clean_lines = []
-                for line in content.split('\n'):
-                    line = line.strip()
-                    if line:
-                        clean_lines.append(line)
-                
                 # Очищаем путь от символов форматирования
                 clean_path = []
                 for p in section["path"][1:]:  # Пропускаем первый элемент (общий заголовок)
@@ -738,7 +738,7 @@ class DocsService:
                 
                 if clean_path:
                     response = f"{' > '.join(clean_path)}:\n\n"
-                    response += '\n'.join(clean_lines)
+                    response += '\n'.join(content.split('\n'))
                     return response.strip()
             
             return "Извините, я не нашел релевантной информации по вашему вопросу. Попробуйте переформулировать вопрос или уточните, что именно вас интересует."
@@ -746,6 +746,53 @@ class DocsService:
         except Exception as e:
             logger.error(f"Error getting relevant knowledge: {e}")
             return "Произошла ошибка при поиске информации"
+
+    async def get_response(self, query: str, inventory_data: list = None) -> str:
+        """Получает ответ на запрос пользователя"""
+        try:
+            logger.info(f"Получен запрос: {query}")
+            logger.info(f"Данные инвентаря:\n{inventory_data}")
+
+            # Проверяем запрос на наличие ключевых слов о товарах
+            product_keywords = ['цена', 'стоимость', 'сколько стоит', 'купить', 'заказать', 'есть ли в наличии', 'остаток', 'что есть']
+            
+            if any(keyword in query.lower() for keyword in product_keywords):
+                # Если запрос общий о наличии
+                general_keywords = ['что есть', 'покажи', 'какие есть', 'ассортимент', 'наличие']
+                if any(keyword in query.lower() for keyword in general_keywords):
+                    if not inventory_data:
+                        return "Извините, информация о наличии цветов временно недоступна"
+                    
+                    response = "В наличии следующие цветы:\n\n"
+                    for item in inventory_data:
+                        response += f"🌸 {item['name']}: {item['price']}"
+                        if item['quantity'] > 0:
+                            response += f" (в наличии: {item['quantity']})"
+                        if item['description']:
+                            response += f"\n   {item['description']}"
+                        response += "\n\n"
+                    return response
+                
+                # Если запрос о конкретном товаре
+                for item in inventory_data or []:
+                    if item['name'].lower() in query.lower():
+                        response = (
+                            f"🌸 {item['name']}\n"
+                            f"💰 Цена: {item['price']}\n"
+                            f"📦 В наличии: {item['quantity']} шт."
+                        )
+                        if item['description']:
+                            response += f"\n📝 Описание: {item['description']}"
+                        return response
+                
+                return "Извините, я не нашел такой товар в нашем каталоге. Хотите посмотреть весь ассортимент?"
+            
+            # Если запрос не о товарах, ищем в базе знаний
+            return await self.get_relevant_knowledge(query)
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении ответа: {str(e)}", exc_info=True)
+            return "Извините, произошла ошибка при обработке вашего вопроса. Попробуйте спросить по-другому или свяжитесь с оператором."
 
     def find_relevant_section(self, query: str) -> Optional[str]:
         """Находит релевантный раздел для запроса."""
